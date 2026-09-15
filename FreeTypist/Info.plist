@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Sparkle. Everything else in this bundle's Info.plist is generated from
+	     build settings (GENERATE_INFOPLIST_FILE / INFOPLIST_KEY_*) and merged
+	     in on top of these keys; only Sparkle's SU* keys have to live here,
+	     because INFOPLIST_KEY_* only understands Apple's own key names. -->
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/shakeebatme/FreeTypist/main/appcast.xml</string>
+
+	<!-- EdDSA public key for verifying downloaded updates. Written here by
+	     scripts/generate-update-keys.sh; the matching private key stays in the
+	     login keychain and is never committed. Until it is set, the app leaves
+	     the update UI disabled rather than offering an unverifiable download. -->
+	<key>SUPublicEDKey</key>
+	<string></string>
+
+	<!-- Daily. Sparkle still asks the user before the first automatic check. -->
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+</dict>
+</plist>

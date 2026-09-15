@@ -1,0 +1,29 @@
+# Build output
+DerivedData/
+build/
+dist/
+*.o
+*.swiftmodule
+
+# Generated from project.yml by xcodegen; scripts/install.sh regenerates it.
+FreeTypist.xcodeproj/
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# macOS
+.DS_Store
+
+# Models are downloaded at runtime into Application Support, never vendored.
+*.gguf
+
+# Local model-experiment harness and its write-ups. Scratch work for comparing
+# backends, not part of the app or its build.
+Tests/ModelExperiment/
+docs/experiments/
+scripts/model-experiment-backend.py
+scripts/model-experiment.sh
+scripts/run-model-experiment.py
+scripts/summarize-model-experiment.py

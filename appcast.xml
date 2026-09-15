@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>FreeTypist</title>
+    <link>https://raw.githubusercontent.com/shakeebatme/FreeTypist/main/appcast.xml</link>
+    <description>Updates for FreeTypist.</description>
+    <language>en</language>
+  </channel>
+</rss>

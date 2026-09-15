@@ -1,0 +1,43 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "display-p3:0.35686,0.66275,1.00000,1.00000",
+      "display-p3:0.14902,0.16863,0.66667,1.00000"
+    ]
+  },
+  "groups": [
+    {
+      "blur-material": 0.5,
+      "layers": [
+        {
+          "glass": true,
+          "image-name": "caret.svg",
+          "name": "Caret"
+        },
+        {
+          "glass": true,
+          "image-name": "text.svg",
+          "name": "Typed text"
+        },
+        {
+          "glass": true,
+          "image-name": "ghost.svg",
+          "name": "Ghost text",
+          "opacity": 0.34
+        }
+      ],
+      "lighting": "individual",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.5
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}
