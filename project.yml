@@ -21,7 +21,10 @@ settings:
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
     DEVELOPMENT_TEAM: ""
-    ENABLE_HARDENED_RUNTIME: NO
+    # Required for notarization. The build signs with CODE_SIGNING_ALLOWED=NO
+    # and scripts/sign-app.sh signs afterwards, so it is that script's
+    # `--options runtime` that actually carries this — but keep them agreed.
+    ENABLE_HARDENED_RUNTIME: YES
 targets:
   FreeTypist:
     type: application

@@ -88,6 +88,7 @@ xcrun swiftc -swift-version 6 \
 
 echo "==> Personalization store"
 xcrun swiftc -swift-version 6 \
+  FreeTypist/Log.swift \
   FreeTypist/PersonalizationStore.swift \
   Tests/StoreTests/main.swift \
   -o "$OUT/store"

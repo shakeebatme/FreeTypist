@@ -5,6 +5,7 @@
 #   scripts/release.sh 0.3
 #   scripts/release.sh 0.3 --notes notes.html
 #   scripts/release.sh 0.3 --notes notes.html --publish
+#   scripts/release.sh 0.3 --no-notarize          # ship without Apple's ticket
 #
 # Without --publish nothing leaves the machine: the zip lands in dist/ and
 # appcast.xml is edited but not committed or pushed. Users only see the update
@@ -18,11 +19,13 @@ REPO="shakeebatme/FreeTypist"
 VERSION=""
 NOTES=""
 PUBLISH=0
+NOTARIZE=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --notes) NOTES="$2"; shift 2 ;;
     --publish) PUBLISH=1; shift ;;
+    --no-notarize) NOTARIZE=0; shift ;;
     -*) echo "Unknown option: $1" >&2; exit 1 ;;
     *) VERSION="$1"; shift ;;
   esac
@@ -53,6 +56,23 @@ if [ "$PUBLISH" -eq 1 ] && ! command -v gh >/dev/null 2>&1; then
   echo "    brew install gh && gh auth login" >&2
   echo "Or re-run without --publish and upload the zip through the web UI." >&2
   exit 1
+fi
+
+# Checked before the build, not after: shipping unnotarized is a decision, not
+# something to discover at the end. Without a Developer ID certificate macOS
+# refuses the download on every Mac but this one, so it takes an explicit flag.
+if [ "$NOTARIZE" -eq 1 ]; then
+  if ! security find-identity -v -p codesigning 2>/dev/null \
+      | grep -v CSSMERR_TP_CERT_REVOKED | grep -q "Developer ID Application"; then
+    echo "No Developer ID Application certificate in the keychain." >&2
+    echo >&2
+    echo "It comes with the Apple Developer Program (99 USD/year); create it at" >&2
+    echo "developer.apple.com > Certificates > + > Developer ID Application." >&2
+    echo >&2
+    echo "To release without it — every user then has to clear the quarantine" >&2
+    echo "flag by hand before the first launch — re-run with --no-notarize." >&2
+    exit 1
+  fi
 fi
 
 TOOLS=""
@@ -119,6 +139,17 @@ DIST="$ROOT/dist"
 mkdir -p "$DIST"
 ZIP="$DIST/FreeTypist-$VERSION.zip"
 rm -f "$ZIP"
+
+# Before archiving, deliberately: the ticket is stapled to the .app, so the
+# archive has to be built afterwards to carry it. Archive first and you ship a
+# zip whose contents Gatekeeper still refuses.
+if [ "$NOTARIZE" -eq 1 ]; then
+  echo "==> Notarizing"
+  scripts/notarize.sh "$STAGE/FreeTypist.app"
+else
+  echo "==> Skipping notarization (--no-notarize)"
+  echo "    Users will have to run: xattr -dr com.apple.quarantine /Applications/FreeTypist.app"
+fi
 
 echo "==> Archiving"
 # ditto, not zip: it is the only one that preserves the symlinks and extended

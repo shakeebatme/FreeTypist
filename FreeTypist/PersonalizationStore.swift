@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import OSLog
 import SQLite3
 
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -341,13 +342,41 @@ private enum KeyStore {
     private static let service = "com.freetypist.app.personalization"
     private static let account = "aes-gcm-key"
 
-    static func loadOrCreate() -> SymmetricKey? {
-        if let existing = load() { return existing }
-        let fresh = SymmetricKey(size: .bits256)
-        return store(fresh) ? fresh : nil
+    /// Telling "there is no key yet" apart from "the key is there and could not
+    /// be read" is the entire reason this type exists.
+    private enum Lookup {
+        case found(SymmetricKey)
+        /// No such item. A first run, so minting one is correct.
+        case absent
+        /// The item exists but this build could not read it: a denied or
+        /// cancelled keychain prompt, or a locked keychain. Most often a
+        /// changed code identity, because the item's ACL matches on the
+        /// designated requirement.
+        case unreadable(OSStatus)
     }
 
-    private static func load() -> SymmetricKey? {
+    static func loadOrCreate() -> SymmetricKey? {
+        switch load() {
+        case .found(let existing):
+            return existing
+        case .absent:
+            let fresh = SymmetricKey(size: .bits256)
+            return store(fresh) ? fresh : nil
+        case .unreadable(let status):
+            // Emphatically do not mint a replacement here. `store` deletes the
+            // existing item first, and every phrase and term already recorded
+            // is sealed under the key that would be thrown away — the rows
+            // would survive in the database and never be readable again.
+            //
+            // Personalization stays off for this launch instead. The data keeps
+            // until the key is reachable, which is what makes a certificate
+            // change survivable rather than destructive.
+            Log.core.error("personalization key present but unreadable (OSStatus \(status)); leaving it in place and disabling personalization for this launch")
+            return nil
+        }
+    }
+
+    private static func load() -> Lookup {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -356,9 +385,18 @@ private enum KeyStore {
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { return nil }
-        return SymmetricKey(data: data)
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        switch status {
+        case errSecSuccess:
+            guard let data = item as? Data else { return .unreadable(status) }
+            return .found(SymmetricKey(data: data))
+        case errSecItemNotFound:
+            return .absent
+        default:
+            // errSecAuthFailed, errSecUserCanceled, errSecInteractionNotAllowed
+            // and friends all land here, and all of them mean "do not touch it".
+            return .unreadable(status)
+        }
     }
 
     private static func store(_ key: SymmetricKey) -> Bool {

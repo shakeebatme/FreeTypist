@@ -1,11 +1,20 @@
 #!/bin/zsh
 # Build FreeTypist and package it as a distributable .dmg.
 #
-# The DMG is signed but NOT notarized: this keychain holds only Apple
-# Development certificates, and notarization refuses those. Testers on other
-# Macs must therefore clear the quarantine attribute by hand — see INSTALL.txt,
-# which is written into the image.
+# Signed, notarized and stapled by default, which is what lets someone open it
+# by double-clicking instead of running an xattr incantation first. Pass
+# --no-notarize to skip that (a build only the machine that made it can open
+# without ceremony).
+#
+# Both the app and the image are notarized. Stapling only the image would leave
+# the copy dragged out of it without a ticket, so a first launch with no network
+# would still be refused.
 set -e
+
+NOTARIZE=1
+if [ "$1" = "--no-notarize" ]; then
+  NOTARIZE=0
+fi
 
 ROOT="${0:A:h:h}"
 cd "$ROOT"
@@ -41,6 +50,11 @@ APP="$SRCDIR/FreeTypist.app"
 echo "==> Signing"
 scripts/sign-app.sh "$APP"
 
+if [ "$NOTARIZE" -eq 1 ]; then
+  echo "==> Notarizing the app"
+  scripts/notarize.sh "$APP"
+fi
+
 ln -s /Applications "$SRCDIR/Applications"
 
 cat > "$SRCDIR/INSTALL.txt" <<'TXT'
@@ -51,24 +65,15 @@ Requires an Apple Silicon Mac running macOS 14 or later.
 
 1. Drag FreeTypist.app onto the Applications folder in this window.
 
-2. This build is signed but NOT notarized, so macOS quarantines it and will
-   refuse to open it ("damaged", or "cannot be opened"). Clear the quarantine
-   flag in Terminal:
-
-       xattr -dr com.apple.quarantine /Applications/FreeTypist.app
-
-   Do this before the first launch. Right-click > Open does not work for a
-   non-notarized app on recent macOS.
-
-3. Launch it from /Applications — not from a Downloads folder or a disk image.
+2. Launch it from /Applications — not from a Downloads folder or a disk image.
    macOS attaches permissions to a code identity at a path; running a copy
    elsewhere means granting permission all over again.
 
-4. Grant access in System Settings > Privacy & Security > Accessibility, and
+3. Grant access in System Settings > Privacy & Security > Accessibility, and
    again under Screen Recording if the app asks. FreeTypist has no Dock icon:
    it lives in the menu bar.
 
-5. On first run it downloads a GGUF model into Application Support. That is the
+4. On first run it downloads a GGUF model into Application Support. That is the
    only network request the app makes; after it completes, nothing you type
    leaves the machine.
 
@@ -91,9 +96,18 @@ hdiutil create -volname "$VOLUME" -srcfolder "$SRCDIR" \
 
 codesign --force --timestamp --sign "$IDENTITY" "$DMG"
 
+if [ "$NOTARIZE" -eq 1 ]; then
+  echo "==> Notarizing the image"
+  scripts/notarize.sh "$DMG"
+fi
+
 SIZE=$(du -h "$DMG" | cut -f1 | tr -d ' ')
 echo
 echo "==> $DMG  ($SIZE, version $VERSION build $BUILD)"
 echo
-echo "NOT notarized — this keychain has no Developer ID Application certificate."
-echo "Testers must run: xattr -dr com.apple.quarantine /Applications/FreeTypist.app"
+if [ "$NOTARIZE" -eq 1 ]; then
+  echo "Notarized and stapled. Opens by double-click on any Mac, offline included."
+else
+  echo "NOT notarized (--no-notarize). Every other Mac will refuse the first launch until:"
+  echo "    xattr -dr com.apple.quarantine /Applications/FreeTypist.app"
+fi

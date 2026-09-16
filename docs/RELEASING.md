@@ -59,7 +59,42 @@ download the app by hand.
 git add FreeTypist/Info.plist && git commit -m "Add update signing key"
 ```
 
-### 5. Install the GitHub CLI (optional)
+### 5. Set up notarization
+
+Notarization is what lets a normal user open the app by double-clicking. Without
+it macOS refuses the first launch on every Mac but yours, and the only way past
+is a Terminal command.
+
+You need the **Apple Developer Program** (99 USD/year) and a **Developer ID
+Application** certificate from developer.apple.com > Certificates > + >
+Developer ID Application. An Apple Development certificate will not do;
+notarization refuses those.
+
+Then store credentials once:
+
+```sh
+xcrun notarytool store-credentials FreeTypist \
+  --apple-id <your-apple-id> \
+  --team-id <your-team-id> \
+  --password <app-specific-password>
+```
+
+The password is an **app-specific password** from appleid.apple.com, not your
+Apple ID password. The profile name `FreeTypist` is what the scripts look for;
+override it with `FREETYPIST_NOTARY_PROFILE`.
+
+Verify it took:
+
+```sh
+xcrun notarytool history --keychain-profile FreeTypist
+```
+
+**Do this before your first release, not after.** Changing certificates later
+revokes Accessibility and Screen Recording for every existing user, makes macOS
+re-prompt for the personalization key, and is the one update Sparkle is likely
+to refuse. At zero users that is free; at five hundred it is a migration.
+
+### 6. Install the GitHub CLI (optional)
 
 Only needed for `--publish`; you can upload through the web UI instead.
 
@@ -106,10 +141,17 @@ Nothing leaves the machine. In order, it:
    integer in `project.yml`;
 3. builds Release, then signs via `scripts/sign-app.sh` (Sparkle's nested
    helpers first, then the frameworks, then the bundle);
-4. archives with `ditto` to `dist/FreeTypist-0.3.zip`;
-5. signs that archive with the private key **and verifies the signature against
+4. **notarizes the app with Apple and staples the ticket to it** — a few
+   minutes, and the step that decides whether a stranger can open the download;
+5. archives with `ditto` to `dist/FreeTypist-0.3.zip`, *after* stapling, so the
+   archive carries the ticket;
+6. signs that archive with the private key **and verifies the signature against
    it**;
-6. inserts an `<item>` at the top of `appcast.xml`.
+7. inserts an `<item>` at the top of `appcast.xml`.
+
+Pass `--no-notarize` to skip step 4. Without it the script refuses to build a
+release when no Developer ID certificate is present, rather than quietly
+producing one nobody can open.
 
 Then it stops and prints the two commands for Step 3 and Step 4.
 
@@ -234,6 +276,19 @@ signing Sparkle updates* item first — `-f` will not overwrite one.
 Do **not** generate a fresh key to make the error go away. That orphans every
 existing install.
 
+### Notarization was rejected
+
+Apple says why, but only if you ask:
+
+```sh
+xcrun notarytool log <submission-id> --keychain-profile FreeTypist
+```
+
+The submission id is in the failing output. The usual causes are a signature
+without the hardened runtime, a missing secure timestamp, or nested code signed
+after the bundle that contains it — all three of which `scripts/sign-app.sh`
+handles, so a rejection most often means something was signed outside it.
+
 ### An update downloads but will not install
 
 Almost always the signing order. `scripts/sign-app.sh` signs Sparkle's four
@@ -255,16 +310,16 @@ its own updates, so verification proves nothing here. Only Step 5 does.
 
 ---
 
-## Still ahead: notarization
+## Gatekeeper, end to end
 
-Releases today are signed with an Apple Development certificate and are not
-notarized, so a *first* install still needs
-`xattr -dr com.apple.quarantine /Applications/FreeTypist.app`. Updates
-installed by Sparkle do not.
+What a stranger downloading v0.3 actually meets: a signed, notarized, stapled
+image that opens on a double-click, with no Terminal step and no "damaged"
+dialog. They still grant Accessibility by hand in System Settings, because that
+is a permission rather than a signature, and nothing can pre-grant it.
 
-Moving to a Developer ID certificate is the one update Sparkle is likely to
-refuse outright — it compares the incoming bundle's signing identity against
-the running app's — on top of revoking Accessibility and Screen Recording and
-putting the personalization key at risk. See **Distribution and notarization**
-in the README before attempting it, and test that specific transition with a
-throwaway release first.
+Check any artefact the way their Mac will:
+
+```sh
+spctl --assess --type execute --verbose=2 /Applications/FreeTypist.app
+xcrun stapler validate /Applications/FreeTypist.app
+```

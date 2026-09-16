@@ -34,11 +34,19 @@ done
 
 # Match by SHA-1, not by name. Six certificates share one name on this machine
 # and five are revoked, so letting `head -1` of a name grep decide is a coin toss.
+#
+# Developer ID wins when present: it is the only identity notarization accepts,
+# and picking the development certificate for a release would produce a build
+# that cannot be notarized and whose identity differs from every shipped copy.
 IDENTITY="${FREETYPIST_IDENTITY:-}"
 if [ -z "$IDENTITY" ]; then
-  IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
-    | grep -v CSSMERR_TP_CERT_REVOKED \
+  VALID=$(security find-identity -v -p codesigning 2>/dev/null \
+    | grep -v CSSMERR_TP_CERT_REVOKED)
+  IDENTITY=$(echo "$VALID" | grep "Developer ID Application" \
     | grep -oE '[0-9A-F]{40}' | head -1)
+  if [ -z "$IDENTITY" ]; then
+    IDENTITY=$(echo "$VALID" | grep -oE '[0-9A-F]{40}' | head -1)
+  fi
 fi
 if [ -z "$IDENTITY" ]; then
   if [ "$ADHOC_OK" -eq 1 ]; then
@@ -57,11 +65,16 @@ fi
 
 [ -n "$APP" ] && [ -d "$APP" ] || { echo "Usage: sign-app.sh [options] <path to .app>" >&2; exit 1; }
 
+# `--options runtime` is the hardened runtime, which notarization requires. It
+# is applied to local builds too: llama's Metal backend compiles its shaders at
+# runtime, and if that were ever to break under the hardened runtime it should
+# break on this machine rather than in somebody's download.
+#
 # A secure timestamp needs the network, which a local install should not.
 if [ "$TIMESTAMP" -eq 1 ]; then
-  FLAGS=(--force --timestamp --sign "$IDENTITY")
+  FLAGS=(--force --timestamp --options runtime --sign "$IDENTITY")
 else
-  FLAGS=(--force --sign "$IDENTITY")
+  FLAGS=(--force --options runtime --sign "$IDENTITY")
 fi
 
 sign() { codesign $FLAGS "$@" }
