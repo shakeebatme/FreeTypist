@@ -35,9 +35,8 @@ FreeTypist holds unusual privileges, and these are the parts worth your time:
 
 ## What is out of scope
 
-- Missing notarization, and the `xattr -dr com.apple.quarantine` step in the
-  install instructions. Known, documented, and tracked in the README.
-- The absence of hardened runtime, for the same reason.
+- Builds you compile and sign yourself. Only published releases are signed
+  with a Developer ID and notarized.
 - Reports that the app requires Accessibility access. That is the design.
 - Anything requiring an attacker to already have code execution as your user —
   at that point they can read the Keychain directly.
