@@ -23,46 +23,27 @@ struct MenuBarView: View {
         Divider()
 
         if let app = frontApp {
+            // Same words and durations as the Excluded Apps settings pane.
             if preferences.suggestsIn(app.id) {
-                Menu("Disable Completions in \(app.name)") {
-                    Button("For 10 Minutes") { preferences.disabledUntil[app.id] = pause(10) }
-                    Button("For 1 Hour") { preferences.disabledUntil[app.id] = pause(60) }
-                    Button("Until Turned Back On") { preferences.perAppEnabled[app.id] = false }
+                Menu("Exclude \(app.name)") {
+                    durationButtons { preferences.exclude(app.id, name: app.name, for: $0) }
                 }
             } else {
-                Button("Resume Completions in \(app.name)") {
-                    preferences.perAppEnabled[app.id] = true
-                    preferences.disabledUntil[app.id] = nil
-                    preferences.excludedBundleIDs.remove(app.id)
-                }
+                Button("Stop Excluding \(app.name)") { preferences.include(app.id) }
             }
         }
 
         if preferences.isEnabled {
-            Menu("Disable Completions Globally") {
-                Button("For 10 Minutes") { disableGlobally(minutes: 10) }
-                Button("For 1 Hour") { disableGlobally(minutes: 60) }
-                Button("Until Turned Back On") { model.setEnabled(false) }
+            Menu("Exclude All Apps") {
+                durationButtons { model.disable(for: $0) }
             }
         } else {
-            Button("Resume Completions") { model.setEnabled(true) }
+            Button("Stop Excluding All Apps") { model.setEnabled(true) }
         }
 
         if let app = frontApp, preferences.recordWriting {
-            Menu("Recording Your Writing in \(app.name)") {
-                Toggle("Record Here", isOn: Binding(
-                    get: { !preferences.recordingExcludedBundleIDs.contains(app.id) },
-                    set: { value in
-                        if value {
-                            preferences.recordingExcludedBundleIDs.remove(app.id)
-                        } else {
-                            preferences.recordingExcludedBundleIDs.insert(app.id)
-                        }
-                    }
-                ))
-                Button("Delete What Was Recorded Here") {
-                    Task { await coordinator.personalization.deleteRecords(forApp: app.id) }
-                }
+            Button("Delete What Was Recorded in \(app.name)") {
+                Task { await coordinator.personalization.deleteRecords(forApp: app.id) }
             }
         }
 
@@ -88,16 +69,9 @@ struct MenuBarView: View {
             .keyboardShortcut("q", modifiers: .command)
     }
 
-    private func pause(_ minutes: Int) -> Date {
-        Date().addingTimeInterval(Double(minutes) * 60)
-    }
-
-    private func disableGlobally(minutes: Int) {
-        model.setEnabled(false)
-        // Re-enable on a timer rather than leaving it off silently.
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(Double(minutes) * 60))
-            model.setEnabled(true)
+    private func durationButtons(_ action: @escaping (ExclusionDuration) -> Void) -> some View {
+        ForEach(ExclusionDuration.allCases, id: \.self) { duration in
+            Button(duration.title) { action(duration) }
         }
     }
 }

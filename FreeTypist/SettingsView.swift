@@ -22,7 +22,7 @@ struct SettingsView: View {
             case .emoji: "Emoji"
             case .shortcuts: "Shortcuts"
             case .battery: "Battery"
-            case .apps: "App Settings"
+            case .apps: "Excluded Apps"
             case .statistics: "Statistics"
             case .about: "About"
             }
@@ -37,7 +37,7 @@ struct SettingsView: View {
             case .emoji: "face.smiling"
             case .shortcuts: "command"
             case .battery: "battery.100"
-            case .apps: "slider.horizontal.3"
+            case .apps: "hand.raised"
             case .statistics: "chart.bar"
             case .about: "info.circle"
             }
@@ -73,10 +73,16 @@ struct SettingsView: View {
             }
             .navigationSplitViewColumnWidth(min: 190, ideal: 200, max: 230)
         } detail: {
-            Form {
-                detail
+            Group {
+                if selection == .apps {
+                    AppSettingsPane(preferences: preferences)
+                } else {
+                    Form {
+                        detail
+                    }
+                    .formStyle(.grouped)
+                }
             }
-            .formStyle(.grouped)
             .navigationTitle(selection.title)
         }
         .frame(minWidth: 720, minHeight: 520)
@@ -121,7 +127,8 @@ struct SettingsView: View {
         case .battery:
             BatteryPane(preferences: preferences)
         case .apps:
-            AppSettingsPane(preferences: preferences)
+            // Laid out outside the form; see `body`.
+            EmptyView()
         case .statistics:
             StatisticsPane(coordinator: coordinator)
         case .about:

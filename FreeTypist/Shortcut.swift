@@ -101,8 +101,8 @@ enum ShortcutAction: String, CaseIterable, Codable, Sendable {
         case .nextWord: "Complete only the next word"
         case .fullCompletion: "Trigger full completion"
         case .forceActivate: "Force-activate completions"
-        case .toggleCurrentApp: "Temporarily toggle completions in the current app"
-        case .toggleGlobally: "Toggle completions globally"
+        case .toggleCurrentApp: "Exclude the current app for 10 minutes"
+        case .toggleGlobally: "Exclude all apps"
         }
     }
 
@@ -115,9 +115,9 @@ enum ShortcutAction: String, CaseIterable, Codable, Sendable {
         case .forceActivate:
             "Asks for a suggestion immediately, for the times FreeTypist cannot tell you have started typing."
         case .toggleCurrentApp:
-            "Turns completions off for a few minutes in whichever app is in front."
+            "Adds whichever app is in front to Excluded Apps for 10 minutes. Press again to stop excluding it."
         case .toggleGlobally:
-            "Turns completions off everywhere until pressed again."
+            "Switches completions off in every app until pressed again."
         }
     }
 

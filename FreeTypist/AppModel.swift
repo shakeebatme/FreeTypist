@@ -33,6 +33,9 @@ final class AppModel: ObservableObject {
         inserter.changes = coordinator.changeObserver
 
         coordinator.start()
+        // A timed "exclude all apps" that ran out while the app was not running
+        // ends now; one still running picks up where it left off.
+        if !preferences.isEnabled { scheduleReenable() }
         UpdateController.start()
         // Deferred: presenting a window from init runs before NSApp has finished
         // launching, and the window never takes focus.
@@ -79,5 +82,29 @@ final class AppModel: ObservableObject {
     func setEnabled(_ enabled: Bool) {
         preferences.isEnabled = enabled
         coordinator.setEnabled(enabled)
+    }
+
+    /// Switches completions off in every app, for a while or until switched back on.
+    func disable(for duration: ExclusionDuration) {
+        setEnabled(false)
+        if case .until(let date) = duration.span(from: Date()) {
+            preferences.enabledAgainAt = date
+            scheduleReenable()
+        } else {
+            preferences.enabledAgainAt = nil
+        }
+    }
+
+    /// The end time is saved, not just the timer, so a relaunch does not leave
+    /// completions off for good. At the end, nothing happens if the user has
+    /// changed their mind since: switched back on, or off with no end.
+    private func scheduleReenable() {
+        guard let until = preferences.enabledAgainAt else { return }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(max(0, until.timeIntervalSinceNow)))
+            guard let self, !self.preferences.isEnabled,
+                  let due = self.preferences.enabledAgainAt, due <= Date() else { return }
+            self.setEnabled(true)
+        }
     }
 }

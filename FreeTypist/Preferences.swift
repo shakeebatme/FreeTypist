@@ -5,8 +5,8 @@ import SwiftUI
 final class Preferences: ObservableObject {
     private enum Key {
         static let enabled = "ft.enabled"
+        static let enabledAgainAt = "ft.enabledAgainAt"
         static let useModel = "ft.useModel"
-        static let excluded = "ft.excludedBundleIDs"
         static let maxWords = "ft.maxWords"
         static let screenshotContext = "ft.screenshotContext"
         static let screenshotAppearance = "ft.screenshotAppearance"
@@ -14,12 +14,9 @@ final class Preferences: ObservableObject {
         static let recordWriting = "ft.recordWriting"
         static let recordWithoutAcceptance = "ft.recordWithoutAcceptance"
         static let wordChoiceStrength = "ft.wordChoiceStrength"
-        static let recordingExcluded = "ft.recordingExcludedBundleIDs"
-        static let enabledByDefault = "ft.enabledByDefault"
         static let midLineCompletions = "ft.midLineCompletions"
         static let suppressOnTypo = "ft.suppressOnTypo"
         static let showSuggestedFixes = "ft.showSuggestedFixes"
-        static let perAppEnabled = "ft.perAppEnabled"
         static let escapeBehaviour = "ft.escapeBehaviour"
         static let trailingSpace = "ft.trailingSpace"
         static let trailingPunctuation = "ft.trailingPunctuation"
@@ -27,12 +24,27 @@ final class Preferences: ObservableObject {
         static let pauseInLowPower = "ft.pauseInLowPower"
         static let showMenuBarIcon = "ft.showMenuBarIcon"
         static let terminalSuggestions = "ft.terminalSuggestions"
+        static let appExclusions = "ft.appExclusions"
+        // Replaced by `appExclusions`; read once to carry settings over.
+        static let legacyExcluded = "ft.excludedBundleIDs"
+        static let legacyRecordingExcluded = "ft.recordingExcludedBundleIDs"
+        static let legacyEnabledByDefault = "ft.enabledByDefault"
+        static let legacyPerAppEnabled = "ft.perAppEnabled"
     }
 
     private let defaults = UserDefaults.standard
 
     @Published var isEnabled: Bool {
-        didSet { defaults.set(isEnabled, forKey: Key.enabled) }
+        didSet {
+            defaults.set(isEnabled, forKey: Key.enabled)
+            if isEnabled { enabledAgainAt = nil }
+        }
+    }
+
+    /// When completions switched off in every app come back by themselves.
+    /// `nil` while on, or while off until switched back on.
+    @Published var enabledAgainAt: Date? {
+        didSet { defaults.set(enabledAgainAt, forKey: Key.enabledAgainAt) }
     }
 
     @Published var useModel: Bool {
@@ -76,16 +88,6 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(wordChoiceStrength, forKey: Key.wordChoiceStrength) }
     }
 
-    /// Apps where suggestions still appear but nothing is recorded.
-    @Published var recordingExcludedBundleIDs: Set<String> {
-        didSet { defaults.set(Array(recordingExcludedBundleIDs), forKey: Key.recordingExcluded) }
-    }
-
-    /// When off, suggestions appear only in apps explicitly switched on.
-    @Published var enabledByDefault: Bool {
-        didSet { defaults.set(enabledByDefault, forKey: Key.enabledByDefault) }
-    }
-
     /// Normally suggestions appear only at the end of an unfinished line.
     @Published var midLineCompletions: Bool {
         didSet { defaults.set(midLineCompletions, forKey: Key.midLineCompletions) }
@@ -98,11 +100,6 @@ final class Preferences: ObservableObject {
 
     @Published var showSuggestedFixes: Bool {
         didSet { defaults.set(showSuggestedFixes, forKey: Key.showSuggestedFixes) }
-    }
-
-    /// Per-app overrides. Present means explicitly set, either way.
-    @Published var perAppEnabled: [String: Bool] {
-        didSet { defaults.set(perAppEnabled, forKey: Key.perAppEnabled) }
     }
 
     /// What Escape does while a suggestion is showing.
@@ -119,9 +116,6 @@ final class Preferences: ObservableObject {
     @Published var includeTrailingPunctuation: Bool {
         didSet { defaults.set(includeTrailingPunctuation, forKey: Key.trailingPunctuation) }
     }
-
-    /// Apps switched off for a while, with when they come back.
-    @Published var disabledUntil: [String: Date] = [:]
 
     @Published var emojiSuggestions: Bool {
         didSet { defaults.set(emojiSuggestions, forKey: Key.emojiSuggestions) }
@@ -140,19 +134,21 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(terminalSuggestions, forKey: Key.terminalSuggestions) }
     }
 
-    @Published var excludedBundleIDs: Set<String> {
-        didSet { defaults.set(Array(excludedBundleIDs), forKey: Key.excluded) }
+    /// Apps FreeTypist stays out of: no suggestions, nothing recorded.
+    @Published var exclusions: AppExclusions {
+        didSet { saveExclusions() }
     }
 
     init() {
         defaults.register(defaults: [
             Key.enabled: true, Key.useModel: true, Key.maxWords: 4,
             Key.recordWithoutAcceptance: true, Key.wordChoiceStrength: 0.5,
-            Key.enabledByDefault: true, Key.suppressOnTypo: true,
+            Key.suppressOnTypo: true,
             Key.showSuggestedFixes: true, Key.emojiSuggestions: true,
             Key.pauseInLowPower: true, Key.showMenuBarIcon: true,
         ])
         isEnabled = defaults.bool(forKey: Key.enabled)
+        enabledAgainAt = defaults.object(forKey: Key.enabledAgainAt) as? Date
         useModel = defaults.bool(forKey: Key.useModel)
         maxWords = defaults.integer(forKey: Key.maxWords)
         screenshotContext = defaults.bool(forKey: Key.screenshotContext)
@@ -161,12 +157,9 @@ final class Preferences: ObservableObject {
         recordWriting = defaults.bool(forKey: Key.recordWriting)
         recordWithoutAcceptance = defaults.bool(forKey: Key.recordWithoutAcceptance)
         wordChoiceStrength = defaults.double(forKey: Key.wordChoiceStrength)
-        recordingExcludedBundleIDs = Set(defaults.stringArray(forKey: Key.recordingExcluded) ?? [])
-        enabledByDefault = defaults.bool(forKey: Key.enabledByDefault)
         midLineCompletions = defaults.bool(forKey: Key.midLineCompletions)
         suppressOnTypo = defaults.bool(forKey: Key.suppressOnTypo)
         showSuggestedFixes = defaults.bool(forKey: Key.showSuggestedFixes)
-        perAppEnabled = defaults.dictionary(forKey: Key.perAppEnabled) as? [String: Bool] ?? [:]
         escapeBehaviour = EscapeBehaviour(rawValue: defaults.string(forKey: Key.escapeBehaviour) ?? "")
             ?? .pauseBriefly
         includeTrailingSpace = defaults.bool(forKey: Key.trailingSpace)
@@ -175,52 +168,65 @@ final class Preferences: ObservableObject {
         pauseInLowPower = defaults.bool(forKey: Key.pauseInLowPower)
         showMenuBarIcon = defaults.bool(forKey: Key.showMenuBarIcon)
         terminalSuggestions = defaults.bool(forKey: Key.terminalSuggestions)
-        let stored = defaults.stringArray(forKey: Key.excluded) ?? [
-            "com.apple.keychainaccess",
-            "com.1password.1password",
-            "com.agilebits.onepassword7",
-        ]
-        excludedBundleIDs = Set(stored)
+        exclusions = Self.loadExclusions(from: defaults)
+        pruneExpiredExclusions()
     }
 
-    func isExcluded(_ bundleID: String?) -> Bool {
-        guard let bundleID else { return false }
-        return excludedBundleIDs.contains(bundleID)
+    /// Reads the saved list, or builds it once from the settings it replaced.
+    private static func loadExclusions(from defaults: UserDefaults) -> AppExclusions {
+        if let data = defaults.data(forKey: Key.appExclusions),
+           var saved = try? JSONDecoder().decode(AppExclusions.self, from: data) {
+            if saved.addNewDefaults() { save(saved, to: defaults) }
+            return saved
+        }
+        let migrated = AppExclusions.migrating(
+            excluded: defaults.stringArray(forKey: Key.legacyExcluded),
+            perAppEnabled: defaults.dictionary(forKey: Key.legacyPerAppEnabled) as? [String: Bool],
+            recordingExcluded: defaults.stringArray(forKey: Key.legacyRecordingExcluded),
+            name: InstalledApp.name(for:)
+        )
+        if save(migrated, to: defaults) {
+            for key in [Key.legacyExcluded, Key.legacyPerAppEnabled,
+                        Key.legacyRecordingExcluded, Key.legacyEnabledByDefault] {
+                defaults.removeObject(forKey: key)
+            }
+        }
+        return migrated
+    }
+
+    private func saveExclusions() {
+        Self.save(exclusions, to: defaults)
+    }
+
+    @discardableResult
+    private static func save(_ exclusions: AppExclusions, to defaults: UserDefaults) -> Bool {
+        guard let data = try? JSONEncoder().encode(exclusions) else { return false }
+        defaults.set(data, forKey: Key.appExclusions)
+        return true
     }
 
     /// Whether suggestions should appear in this app at all.
     func suggestsIn(_ bundleID: String?) -> Bool {
-        guard let bundleID else { return enabledByDefault }
-        if excludedBundleIDs.contains(bundleID) { return false }
-        if let until = disabledUntil[bundleID], until > Date() { return false }
-        return perAppEnabled[bundleID] ?? enabledByDefault
+        !exclusions.excludes(bundleID)
     }
 
-    /// Switches an app off for a while, or back on if it already is.
-    @discardableResult
-    func toggleTemporarily(_ bundleID: String, minutes: Int = 10) -> Bool {
-        if let until = disabledUntil[bundleID], until > Date() {
-            disabledUntil[bundleID] = nil
-            return true
-        }
-        disabledUntil[bundleID] = Date().addingTimeInterval(Double(minutes) * 60)
-        return false
-    }
-
-    /// Recording is refused unless it is switched on *and* the app is allowed.
+    /// Recording is refused unless it is switched on *and* the app is not excluded.
     func mayRecord(_ bundleID: String?) -> Bool {
         guard recordWriting, let bundleID else { return false }
-        return recordingAllowed(in: bundleID)
+        return !exclusions.excludes(bundleID)
     }
 
-    /// Whether this app would be recorded, ignoring the global switch.
-    ///
-    /// An app excluded from suggestions is excluded from recording too — the
-    /// exclusion list exists for password managers, and recording there would be
-    /// far worse than suggesting. The settings toggle must show that, or it
-    /// claims recording is on where it is not.
-    func recordingAllowed(in bundleID: String) -> Bool {
-        !excludedBundleIDs.contains(bundleID)
-            && !recordingExcludedBundleIDs.contains(bundleID)
+    func exclude(_ bundleID: String, name: String, for duration: ExclusionDuration) {
+        exclusions.exclude(bundleID, name: name, span: duration.span(from: Date()))
+    }
+
+    func include(_ bundleID: String) {
+        exclusions.remove(bundleID)
+    }
+
+    /// Assigns only when something ran out, so views are not refreshed for nothing.
+    func pruneExpiredExclusions() {
+        var pruned = exclusions
+        if pruned.pruneExpired() { exclusions = pruned }
     }
 }

@@ -401,12 +401,17 @@ final class CompletionCoordinator: ObservableObject {
             return true
 
         case .toggleCurrentApp:
-            guard let app = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+            guard let front = NSWorkspace.shared.frontmostApplication,
+                  let app = front.bundleIdentifier,
                   app != ownBundleID else { return false }
-            let reEnabled = preferences.toggleTemporarily(app)
-            announce(reEnabled
-                ? "Completions resumed in \(app)."
-                : "Completions paused in \(app) for 10 minutes.")
+            let name = front.localizedName ?? app
+            if preferences.suggestsIn(app) {
+                preferences.exclude(app, name: name, for: .tenMinutes)
+                announce("\(name) excluded for 10 minutes.")
+            } else {
+                preferences.include(app)
+                announce("\(name) is no longer excluded.")
+            }
             clearSuggestion()
             return true
 

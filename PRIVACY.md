@@ -34,8 +34,8 @@ Password fields are always skipped, in every app, regardless of settings. The
 clipboard reader additionally ignores anything a password manager has marked as
 a secret, and anything that looks like an issued token.
 
-You can exclude any app entirely, and Keychain Access and 1Password are
-excluded out of the box.
+You can exclude any app entirely, and Keychain Access, Passwords and 1Password
+are excluded out of the box.
 
 ## What is stored
 

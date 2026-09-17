@@ -44,6 +44,12 @@ xcrun swiftc -swift-version 6 \
   -o "$OUT/compatibility"
 "$OUT/compatibility"
 
+echo "==> Excluded apps"
+xcrun swiftc -swift-version 6 \
+  FreeTypist/AppExclusions.swift Tests/ExclusionTests/main.swift \
+  -o "$OUT/exclusions"
+"$OUT/exclusions"
+
 echo "==> Backdrop"
 # AXSupport comes along for the coordinate flip: ScreenCaptureService converts
 # NSScreen.visibleFrame to Quartz, and duplicating that flip locally is the one

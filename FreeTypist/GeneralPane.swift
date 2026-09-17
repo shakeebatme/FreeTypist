@@ -13,11 +13,6 @@ struct GeneralPane: View {
 
     var body: some View {
         Section("Completions") {
-            Toggle("Enable completions by default", isOn: $preferences.enabledByDefault)
-            Text("When off, completions appear only in apps you switch on individually.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
             Toggle("Complete inside existing text", isOn: $preferences.midLineCompletions)
             Text("Normally suggestions appear only at the end of a line you have not finished. Turn this on to also get them when text follows the cursor.")
                 .font(.caption)
