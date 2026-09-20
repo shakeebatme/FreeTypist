@@ -113,9 +113,14 @@ Models are downloaded once from Hugging Face and stored in
 
 | Model | Download | Notes |
 | --- | --- | --- |
-| **Qwen 3 1.7B** | 1.2 GB | The default: fast and accurate |
+| **Qwen 3 1.7B** | 1.0 GB | The default: fast and accurate |
 | Qwen 3 4B | 2.3 GB | Larger, and about twice as slow |
-| Gemma 3 1B, Gemma 3 4B | 0.8 GB, 2.3 GB | Listed under Other; weaker at this task |
+| Gemma 3 1B, Gemma 3 4B | 0.75 GB, 2.3 GB | Listed under Other; weaker at this task |
+
+These are *base* models rather than the chat-tuned versions of the same
+checkpoints. Finishing a sentence you have started is what a base model does;
+a chat-tuned one keeps trying to answer instead, which is where the `[topic]`
+and `[Date]` placeholders came from.
 
 Switch models any time in **Settings › General**.
 

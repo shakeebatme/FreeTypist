@@ -133,7 +133,7 @@ xcrun swiftc -swift-version 6 \
 "$OUT/store"
 
 # The last two need a model on disk; skipped when absent.
-MODEL="$HOME/Library/Application Support/FreeTypist/Models/Qwen3-1.7B-Q4_K_M.gguf"
+MODEL="$HOME/Library/Application Support/FreeTypist/Models/Qwen3-1.7B-Base.i1-Q4_K_M.gguf"
 FW="$ROOT/Vendor/llama.xcframework/macos-arm64"
 ENGINE=(
   FreeTypist/Log.swift FreeTypist/CompletionRequest.swift

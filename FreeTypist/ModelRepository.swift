@@ -85,35 +85,72 @@ final class ModelRepository: ObservableObject {
     /// completion contains and a two-word non-answer contains nothing to catch;
     /// it rewards saying less. And Qwen's 74ms above does not reproduce here on
     /// either engine, so the old table is stale beyond the part this bug touched.
+    ///
+    /// Re-measured 20 Sep 2026, same machine and prompts, after moving every
+    /// entry from an instruction-tuned checkpoint to the base (pretrained) one
+    /// it was built from. The task here is continuation, not answering, and the
+    /// template-slot habit above is exactly what instruction tuning teaches:
+    ///
+    ///   Qwen 3 1.7B   instruct 165ms  9/10  ->  base 162ms  10/10
+    ///   Gemma 3 1B    instruct 152ms  7/10  ->    pt 132ms  10/10
+    ///   Gemma 3 4B    instruct 343ms  9/10  ->    pt 262ms  10/10
+    ///   Qwen 3 4B     no instruct copy on disk ->  base 342ms  10/10
+    ///
+    /// Every one is cleaner *and* faster than what it replaces, and the
+    /// "[topic]" / "[Date]" / "[Time]" failures are gone rather than rarer —
+    /// not one of the four base models produced a placeholder. That answers the
+    /// question left open above: the placeholders were the instruction tuning,
+    /// not the model. Gemma 3 1B went from three of them to none.
+    ///
+    /// The Gemmas stay in `.other` regardless, because `flags` still cannot see
+    /// the thing that keeps them there. It scores placeholders, repetition and
+    /// length; it does not score relevance, and Gemma 3 1B pt answers "The caret
+    /// rectangle is reported in" with " the mail." Fast, clean, beside the
+    /// point.
+    ///
+    /// Also measured and not adopted: `ggml-org/Qwen3.5-0.8B-Base` (Q8_0,
+    /// 0.83 GB), first-party and the quickest of everything tried — 65ms median
+    /// on half-typed words against Qwen 3 1.7B Base's 90ms. It garbles them
+    /// more often too ("conf" -> "confound", "docum" -> "documetn", and an
+    /// "ifYou" with the space eaten), and none of that trips a flag. Worth
+    /// revisiting if the catalogue ever wants a low-memory tier.
+    ///
+    /// On provenance: these are community re-quantizations, where every entry
+    /// before was `ggml-org`. Neither Qwen nor Google publishes GGUF for the
+    /// base checkpoints at these sizes, Google's own `-pt-qat` repos are gated
+    /// and the in-app download cannot authenticate, and `ggml-org` carries base
+    /// GGUFs only either side of what is wanted (0.6B, 0.8B, 8B). The pinned
+    /// SHA-256 is what makes the trade acceptable: it is checked on arrival, so
+    /// what has to be trusted is the upload itself rather than the wire.
     static let catalogue: [ModelSpec] = [
         ModelSpec(id: "qwen3-1.7b", name: "Qwen 3 1.7B",
-                  repo: "ggml-org/Qwen3-1.7B-GGUF",
-                  file: "Qwen3-1.7B-Q4_K_M.gguf",
-                  sizeBytes: 1_282_439_264,
-                  sha256: "d2387ca2dbfee2ffabce7120d3770dadca0b293052bc2f0e138fdc940d9bc7b5",
+                  repo: "mradermacher/Qwen3-1.7B-Base-i1-GGUF",
+                  file: "Qwen3-1.7B-Base.i1-Q4_K_M.gguf",
+                  sizeBytes: 1_107_409_248,
+                  sha256: "b3aac3227132b11e0ea8c818569f27c053ebde24d0b8530f3bd476e7ff33ee20",
                   tier: .recommended,
                   isDefaultChoice: true, note: "Fastest coherent option"),
         ModelSpec(id: "qwen3-4b", name: "Qwen 3 4B",
-                  repo: "ggml-org/Qwen3-4B-GGUF",
-                  file: "Qwen3-4B-Q4_K_M.gguf",
-                  sizeBytes: 2_497_280_640,
-                  sha256: "ab27b9bfa375a178d6cba48f3ad892b94b7739659dcc7aae8058ce0ffed6b328",
+                  repo: "mradermacher/Qwen3-4B-Base-i1-GGUF",
+                  file: "Qwen3-4B-Base.i1-Q4_K_M.gguf",
+                  sizeBytes: 2_497_280_960,
+                  sha256: "ff17d19ad5f8c7ddc205d1b8c6fadc360449f06a499440dce8c81db6302f19ac",
                   tier: .recommended,
                   isDefaultChoice: false, note: "Slightly richer, about twice as slow"),
         ModelSpec(id: "gemma-3-1b", name: "Gemma 3 1B",
-                  repo: "ggml-org/gemma-3-1b-it-GGUF",
-                  file: "gemma-3-1b-it-Q4_K_M.gguf",
-                  sizeBytes: 806_058_240,
-                  sha256: "8ccc5cd1f1b3602548715ae25a66ed73fd5dc68a210412eea643eb20eb75a135",
+                  repo: "mradermacher/gemma-3-1b-pt-i1-GGUF",
+                  file: "gemma-3-1b-pt.i1-Q4_K_M.gguf",
+                  sizeBytes: 806_057_088,
+                  sha256: "182cedf70c9b8ca472ccc4300b5ead82a9fa9b917416543b66217db761373da9",
                   tier: .other,
-                  isDefaultChoice: false, note: "Coherent, but fills in [placeholders]"),
+                  isDefaultChoice: false, note: "Quickest, and often stops short"),
         ModelSpec(id: "gemma-3-4b", name: "Gemma 3 4B",
-                  repo: "ggml-org/gemma-3-4b-it-GGUF",
-                  file: "gemma-3-4b-it-Q4_K_M.gguf",
-                  sizeBytes: 2_489_757_856,
-                  sha256: "882e8d2db44dc554fb0ea5077cb7e4bc49e7342a1f0da57901c0802ea21a0863",
+                  repo: "mradermacher/gemma-3-4b-pt-i1-GGUF",
+                  file: "gemma-3-4b-pt.i1-Q4_K_M.gguf",
+                  sizeBytes: 2_489_756_704,
+                  sha256: "dd8d55199c411d004b356ee927ae72748544ea4a98cd4b44133bc17029afae10",
                   tier: .other,
-                  isDefaultChoice: false, note: "Repeats words on raw text"),
+                  isDefaultChoice: false, note: "Steady, and as slow as Qwen 3 4B"),
     ]
 
     @Published private(set) var installedIDs: Set<String> = []
