@@ -7,8 +7,10 @@ import Foundation
 /// measuring real output rather than guessing. They are covered by a test suite
 /// that must stay green across engine swaps — see `Tests/SanitizerTests`.
 enum CompletionSanitizer {
-    /// - Parameter needsLeadingSpace: decided by the caller, which can reach
-    ///   AppKit's spell checker to tell a finished word from a half-typed one.
+    /// - Parameter needsLeadingSpace: the fallback, decided by the caller,
+    ///   which can reach AppKit's spell checker to tell a finished word from a
+    ///   half-typed one. Consulted only when the model's own answer has been
+    ///   lost — see the leading-space rule below.
     static func sanitize(
         _ raw: String,
         before: String,
@@ -20,27 +22,37 @@ enum CompletionSanitizer {
         if let newline = text.firstIndex(where: { $0.isNewline }) {
             text = String(text[text.startIndex..<newline])
         }
+        // Read before anything trims it: whether the model opened with a space
+        // is the best evidence there is about whether the caret is sitting
+        // mid-word, and it is about to be thrown away.
+        let modelOpenedWithSpace = text.first?.isWhitespace == true
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // Each of these can rewrite the head of the string, which is where the
+        // model put its answer. Once one has, there is nothing left to read and
+        // the caller's guess is all there is.
+        var headRewritten = false
         for prefix in ["continuation:", "completion:", "output:", "answer:"] where text.lowercased().hasPrefix(prefix) {
             text = String(text.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+            headRewritten = true
         }
 
-        text = stripWrappingQuotes(text)
-        text = removeEcho(of: before, from: text)
+        let unquoted = stripWrappingQuotes(text)
+        if unquoted != text { headRewritten = true }
+        text = unquoted
 
-        // Preserve the user's own spacing decision.
+        let unechoed = removeEcho(of: before, from: text)
+        if unechoed != text { headRewritten = true }
+        text = unechoed
+
+        // Preserve the user's own spacing decision. It outranks both the model
+        // and the caller: they typed the space, or chose not to.
         if before.last?.isWhitespace == true {
             while let first = text.first, first.isWhitespace { text.removeFirst() }
-        }
-
-        // Models do not emit a leading space, even when the caret sits
-        // immediately after a word. Measured across varied prompts: "…time to"
-        // yields "read this…", which would otherwise concatenate into "toread".
-        // Only add one when the caller confirmed the caret is at a word boundary,
-        // so a half-typed "unfortun" still completes to "unfortunately".
-        if needsLeadingSpace,
-           let first = text.first, first.isLetter || first.isNumber {
+        } else if wantsLeadingSpace(model: modelOpenedWithSpace,
+                                    caller: needsLeadingSpace,
+                                    headRewritten: headRewritten),
+                  let first = text.first, first.isLetter || first.isNumber {
             text = " " + text
         }
 
@@ -49,6 +61,38 @@ enum CompletionSanitizer {
         guard !text.isEmpty else { return nil }
         guard text.contains(where: { $0.isLetter || $0.isNumber }) else { return nil }
         return text
+    }
+
+    /// Whether the continuation should start with a space.
+    ///
+    /// The model's own leading whitespace decides it. That reverses what this
+    /// did before, and the reason is that the premise changed underneath it:
+    /// the old rule read "models do not emit a leading space, even when the
+    /// caret sits immediately after a word", which was measured against
+    /// instruction-tuned checkpoints. The catalogue is base checkpoints now,
+    /// and they do emit it — measured over the bench prompts, nine of ten
+    /// continuations opened with a space, and the tenth was the one following a
+    /// half-typed word, which is exactly the case that must not have one.
+    ///
+    /// Deciding it lexically instead corrupted text in both directions.
+    /// "I am avail" is a finished word to a spell checker *and* a prefix of
+    /// longer ones, so a space was forced into the middle of it and the model's
+    /// "ble" arrived as " ble". "…we should resched" is not a word, so the
+    /// space the model did emit was stripped and " the meeting" arrived as
+    /// "the meeting", jammed onto the fragment.
+    ///
+    /// The caller's answer is still the fallback, for when the rules above have
+    /// rewritten the head of the string and taken the model's answer with it.
+    ///
+    /// Note for whoever puts an instruction-tuned model back in the catalogue:
+    /// this needs revisiting, because those really do omit the space and would
+    /// concatenate "…time to" with "read this" into "toread".
+    private static func wantsLeadingSpace(
+        model modelOpenedWithSpace: Bool,
+        caller needsLeadingSpace: Bool,
+        headRewritten: Bool
+    ) -> Bool {
+        headRewritten ? needsLeadingSpace : modelOpenedWithSpace
     }
 
     private static func stripWrappingQuotes(_ text: String) -> String {
