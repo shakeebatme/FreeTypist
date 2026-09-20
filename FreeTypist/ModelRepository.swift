@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SwiftUI
 
@@ -13,6 +14,13 @@ struct ModelSpec: Identifiable, Sendable, Hashable {
     let repo: String
     let file: String
     let sizeBytes: Int64
+    /// SHA-256 of the file's contents, as Hugging Face publishes it.
+    ///
+    /// Not optional, so a catalogue entry cannot be added without one. This is
+    /// the only thing standing between a tampered or truncated download and
+    /// ggml parsing it inside the process that holds Accessibility over every
+    /// app on the Mac.
+    let sha256: String
     let tier: Tier
     /// The measured best default. Chosen from benchmark results rather than
     /// size alone — see `Tests/ModelBench`.
@@ -31,8 +39,16 @@ struct ModelSpec: Identifiable, Sendable, Hashable {
 
 /// Catalogue, download and on-disk management for local models.
 ///
-/// Sizes below were measured against the live Hugging Face endpoints rather
-/// than copied from anywhere.
+/// Sizes and digests below are the values Hugging Face publishes for each file
+/// (`/api/models/<repo>/tree/main`: `size`, and the LFS `oid`, which for these
+/// files is the SHA-256 of the contents). Verified by hashing the three models
+/// that were already on disk — all three matched the published oid exactly.
+///
+/// The sizes were wrong before this, every one of them, and one was not even a
+/// measurement: Gemma 3 1B was recorded as 805,306,368 bytes, which is 768 MiB
+/// to the byte. Nothing noticed because the installed check only asked for half
+/// the expected size. It asks for the exact size now, which is what made the
+/// discrepancy visible.
 @MainActor
 final class ModelRepository: ObservableObject {
     /// Tiers come from measurement, not marketing. Benchmarked over ten
@@ -73,27 +89,39 @@ final class ModelRepository: ObservableObject {
         ModelSpec(id: "qwen3-1.7b", name: "Qwen 3 1.7B",
                   repo: "ggml-org/Qwen3-1.7B-GGUF",
                   file: "Qwen3-1.7B-Q4_K_M.gguf",
-                  sizeBytes: 1_277_752_115, tier: .recommended,
+                  sizeBytes: 1_282_439_264,
+                  sha256: "d2387ca2dbfee2ffabce7120d3770dadca0b293052bc2f0e138fdc940d9bc7b5",
+                  tier: .recommended,
                   isDefaultChoice: true, note: "Fastest coherent option"),
         ModelSpec(id: "qwen3-4b", name: "Qwen 3 4B",
                   repo: "ggml-org/Qwen3-4B-GGUF",
                   file: "Qwen3-4B-Q4_K_M.gguf",
-                  sizeBytes: 2_502_129_090, tier: .recommended,
+                  sizeBytes: 2_497_280_640,
+                  sha256: "ab27b9bfa375a178d6cba48f3ad892b94b7739659dcc7aae8058ce0ffed6b328",
+                  tier: .recommended,
                   isDefaultChoice: false, note: "Slightly richer, about twice as slow"),
         ModelSpec(id: "gemma-3-1b", name: "Gemma 3 1B",
                   repo: "ggml-org/gemma-3-1b-it-GGUF",
                   file: "gemma-3-1b-it-Q4_K_M.gguf",
-                  sizeBytes: 805_306_368, tier: .other,
+                  sizeBytes: 806_058_240,
+                  sha256: "8ccc5cd1f1b3602548715ae25a66ed73fd5dc68a210412eea643eb20eb75a135",
+                  tier: .other,
                   isDefaultChoice: false, note: "Coherent, but fills in [placeholders]"),
         ModelSpec(id: "gemma-3-4b", name: "Gemma 3 4B",
                   repo: "ggml-org/gemma-3-4b-it-GGUF",
                   file: "gemma-3-4b-it-Q4_K_M.gguf",
-                  sizeBytes: 2_491_416_474, tier: .other,
+                  sizeBytes: 2_489_757_856,
+                  sha256: "882e8d2db44dc554fb0ea5077cb7e4bc49e7342a1f0da57901c0802ea21a0863",
+                  tier: .other,
                   isDefaultChoice: false, note: "Repeats words on raw text"),
     ]
 
     @Published private(set) var installedIDs: Set<String> = []
     @Published private(set) var downloadingID: String?
+    /// True while the finished download is being hashed. Progress sits at 100%
+    /// for the couple of seconds that takes, and a bar that stops at full with
+    /// nothing said reads as a hang.
+    @Published private(set) var isVerifying = false
     @Published private(set) var progress: Double = 0
     @Published private(set) var lastError: String?
 
@@ -144,9 +172,18 @@ final class ModelRepository: ObservableObject {
             guard let size = try? fileManager.attributesOfItem(atPath: url.path)[.size] as? Int64 else {
                 return false
             }
-            // A part-written file from an interrupted download must not count as
-            // installed, or the engine fails to load with no explanation.
-            return size > spec.sizeBytes / 2
+            // The exact size, not most of it. A part-written file from an
+            // interrupted download must not count as installed, or the engine
+            // fails to load with no explanation — and "more than half" let a
+            // file that was merely close enough through, which is how four
+            // wrong sizes sat in the catalogue unnoticed.
+            //
+            // Cheap enough to run on every launch, which the digest is not:
+            // hashing measures at about 540 MB/s here, so the recommended model
+            // alone would cost some two and a half seconds of every start. The
+            // digest is checked once, where the bytes arrive, and the size
+            // stands guard afterwards.
+            return size == spec.sizeBytes
         }.map(\.id))
     }
 
@@ -189,13 +226,18 @@ final class ModelRepository: ObservableObject {
 
         let destination = localURL(for: spec)
         let delegate = DownloadDelegate(
+            spec: spec,
             destination: destination,
+            onVerifying: { [weak self] in
+                Task { @MainActor in self?.isVerifying = true }
+            },
             onProgress: { [weak self] fraction in
                 Task { @MainActor in self?.progress = fraction }
             },
             onFinish: { [weak self] error in
                 Task { @MainActor in
                     self?.downloadingID = nil
+                    self?.isVerifying = false
                     self?.progress = 0
                     self?.lastError = error
                     self?.refreshInstalled()
@@ -212,6 +254,7 @@ final class ModelRepository: ObservableObject {
         task?.cancel()
         task = nil
         downloadingID = nil
+        isVerifying = false
         progress = 0
     }
 
@@ -230,16 +273,22 @@ final class ModelRepository: ObservableObject {
 /// A download delegate rather than `URLSession.bytes`: multi-gigabyte files need
 /// a real download task for throughput and byte-accurate progress.
 private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    private let spec: ModelSpec
     private let destination: URL
+    private let onVerifying: @Sendable () -> Void
     private let onProgress: @Sendable (Double) -> Void
     private let onFinish: @Sendable (String?) -> Void
 
     init(
+        spec: ModelSpec,
         destination: URL,
+        onVerifying: @escaping @Sendable () -> Void,
         onProgress: @escaping @Sendable (Double) -> Void,
         onFinish: @escaping @Sendable (String?) -> Void
     ) {
+        self.spec = spec
         self.destination = destination
+        self.onVerifying = onVerifying
         self.onProgress = onProgress
         self.onFinish = onFinish
     }
@@ -260,13 +309,51 @@ private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate, @unc
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
+        // Checked before it is moved into place, never after. The destination
+        // is where `loadableModelPath` looks, so a file that lands there is one
+        // the engine may pick up on the next launch; anything that fails here
+        // has to be discarded rather than left for the size check to maybe
+        // catch later.
         do {
+            let size = try FileManager.default
+                .attributesOfItem(atPath: location.path)[.size] as? Int64 ?? 0
+            guard size == spec.sizeBytes else {
+                try? FileManager.default.removeItem(at: location)
+                onFinish("The download stopped early, so nothing was installed. Try again.")
+                return
+            }
+
+            onVerifying()
+            guard try Self.sha256(of: location) == spec.sha256 else {
+                try? FileManager.default.removeItem(at: location)
+                onFinish(
+                    "The downloaded file is the right size but does not match its "
+                    + "published checksum, so it was discarded. Try again; if it keeps "
+                    + "happening, something between here and Hugging Face is altering it."
+                )
+                return
+            }
+
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: location, to: destination)
             onFinish(nil)
         } catch {
+            try? FileManager.default.removeItem(at: location)
             onFinish(error.localizedDescription)
         }
+    }
+
+    /// Hashes the file in chunks. These run to gigabytes, so it is never read
+    /// into memory whole.
+    static func sha256(of url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 4 * 1024 * 1024), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {

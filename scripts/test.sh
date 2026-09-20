@@ -65,6 +65,16 @@ xcrun swiftc -swift-version 6 \
   -o "$OUT/exclusions"
 "$OUT/exclusions"
 
+echo "==> Model catalogue"
+# Hashes any model already downloaded, so this one takes a few seconds per
+# gigabyte on disk. It is the check that decides whether arbitrary bytes reach
+# ggml, so it runs whether or not a model is there: shape always, contents when
+# there is something to check.
+xcrun swiftc -swift-version 6 \
+  FreeTypist/ModelRepository.swift Tests/ModelCatalogueTests/main.swift \
+  -o "$OUT/catalogue"
+"$OUT/catalogue"
+
 echo "==> Backdrop"
 # AXSupport comes along for the coordinate flip: ScreenCaptureService converts
 # NSScreen.visibleFrame to Quartz, and duplicating that flip locally is the one

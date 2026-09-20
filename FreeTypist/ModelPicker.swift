@@ -85,7 +85,9 @@ struct ModelPicker: View {
     @ViewBuilder
     private func actionButton(for spec: ModelSpec) -> some View {
         if repository.downloadingID == spec.id {
-            Text("\(Int(repository.progress * 100))%")
+            // The percentage sits at 100 while the file is hashed, which for
+            // the larger models is a few seconds of apparently nothing.
+            Text(repository.isVerifying ? "Checking…" : "\(Int(repository.progress * 100))%")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         } else if repository.isInstalled(spec) {
