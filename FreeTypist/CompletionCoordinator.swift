@@ -911,7 +911,12 @@ final class CompletionCoordinator: ObservableObject {
             font: context.caretFont,
             textColor: context.caretTextColor,
             ghostColor: screenContext.cached(for: context).backdrop?.ghostColor,
-            strikeRect: strikeRect(for: suggestion, in: context)
+            strikeRect: strikeRect(for: suggestion, in: context),
+            // The same question `runFastPass` asks before it bothers the model
+            // at all, asked again here because it decides something different:
+            // there, whether to suggest; here, whether ghost text at the caret
+            // would be drawn on top of the user's own words.
+            atLineEnd: Self.isAtLineEnd(context.textAfterCursor)
         )
         syncHotKeys()
     }

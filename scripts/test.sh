@@ -40,6 +40,13 @@ xcrun swiftc -swift-version 6 \
   -o "$OUT/shortcuts"
 "$OUT/shortcuts"
 
+echo "==> Suggestion presentation"
+xcrun swiftc -swift-version 6 \
+  FreeTypist/SuggestionOverlayController.swift FreeTypist/Suggestion.swift \
+  Tests/PresentationTests/main.swift \
+  -o "$OUT/presentation"
+"$OUT/presentation"
+
 echo "==> Terminal"
 xcrun swiftc -swift-version 6 \
   FreeTypist/TerminalContext.swift Tests/TerminalTests/main.swift \

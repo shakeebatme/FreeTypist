@@ -4,10 +4,52 @@ import AppKit
 /// the target app's own font.
 ///
 /// Nothing can draw into another process's text view, so this is a transparent,
-/// click-through window positioned exactly at the caret. Because suggestions are
-/// only offered at the end of a line, the ghost text never covers real text.
+/// click-through window positioned exactly at the caret.
+///
+/// Ghost text is only honest where there is nothing underneath it. Drawing at
+/// the caret means drawing over whatever the app has at those pixels, and the
+/// glyphs are opaque, so with the caret mid-line the user's own words and the
+/// suggestion end up superimposed and neither is readable. That held while
+/// suggestions were offered only at the end of a line; `midLineCompletions`
+/// made it false, and this is where that was answered — see `Presentation`.
 @MainActor
 final class SuggestionOverlayController {
+
+    /// Which of the three ways to show a suggestion fits what is on screen.
+    ///
+    /// Pure and separate from the drawing, because the rule is the part worth
+    /// testing: the drawing needs a live app with a caret in it, the choice
+    /// needs nothing but the four facts below.
+    enum Presentation: Equatable {
+        /// Ghost text at the caret, in the app's own font. Only where the rest
+        /// of the line is empty, so nothing is drawn over.
+        case inline
+        /// The typo struck through where it sits, with the fix beside it.
+        case correction
+        /// A labelled chip below the caret. Occludes a rectangle, but it looks
+        /// like a piece of UI rather than like text the user wrote, which is
+        /// the difference that matters when something is underneath.
+        case pill
+
+        static func choose(
+            isCorrection: Bool,
+            hasCaretRect: Bool,
+            hasStrikeRect: Bool,
+            atLineEnd: Bool
+        ) -> Presentation {
+            // A correction needs to be drawn where the word it replaces sits,
+            // so it needs both rects; without them it has nowhere to point and
+            // falls back like anything else.
+            if isCorrection {
+                return hasCaretRect && hasStrikeRect ? .correction : .pill
+            }
+            // No caret geometry: the app will not say where to draw.
+            guard hasCaretRect else { return .pill }
+            // Mid-line. There is real text in the space the ghost would take.
+            guard atLineEnd else { return .pill }
+            return .inline
+        }
+    }
     private let inlinePanel: NSPanel
     private let ghost: GhostTextView
 
@@ -96,20 +138,33 @@ final class SuggestionOverlayController {
         font: NSFont?,
         textColor: NSColor?,
         ghostColor: NSColor? = nil,
-        strikeRect: CGRect? = nil
+        strikeRect: CGRect? = nil,
+        atLineEnd: Bool
     ) {
         guard !suggestion.isEmpty else {
             hide()
             return
         }
 
-        if suggestion.isCorrection, let caretRect, let strikeRect {
-            // A correction rewrites a word already on screen, so show it there:
-            // strike the typo where it sits and put the fix beside it.
-            showCorrection(suggestion, typo: strikeRect, caret: caretRect, font: font, ghostColor: ghostColor)
-        } else if let caretRect, !suggestion.isCorrection {
-            showInline(suggestion, at: caretRect, font: font, textColor: textColor, ghostColor: ghostColor)
-        } else {
+        switch Presentation.choose(
+            isCorrection: suggestion.isCorrection,
+            hasCaretRect: caretRect != nil,
+            hasStrikeRect: strikeRect != nil,
+            atLineEnd: atLineEnd
+        ) {
+        case .correction:
+            // Both rects are guaranteed by the rule above; the binding is only
+            // to get them out of their optionals.
+            if let caretRect, let strikeRect {
+                showCorrection(suggestion, typo: strikeRect, caret: caretRect,
+                               font: font, ghostColor: ghostColor)
+            }
+        case .inline:
+            if let caretRect {
+                showInline(suggestion, at: caretRect, font: font,
+                           textColor: textColor, ghostColor: ghostColor)
+            }
+        case .pill:
             showPill(suggestion, at: caretRect)
         }
         isVisible = true
