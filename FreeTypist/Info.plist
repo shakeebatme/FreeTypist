@@ -12,9 +12,15 @@
 	<!-- EdDSA public key for verifying downloaded updates. Written here by
 	     scripts/generate-update-keys.sh; the matching private key stays in the
 	     login keychain and is never committed. Until it is set, the app leaves
-	     the update UI disabled rather than offering an unverifiable download. -->
+	     the update UI disabled rather than offering an unverifiable download.
+
+	     Never replace it. Every installed copy verifies against the key it
+	     already has, so a new one orphans all of them at once — they reject
+	     every future update and the only way back is a manual reinstall. Both
+	     generate-update-keys.sh and release.sh refuse to help you do it; this
+	     file is the one place left where it could be done by hand. -->
 	<key>SUPublicEDKey</key>
-	<string></string>
+	<string>Q19nCLePi8aiRfEO9gXRLlDEBY0EBGYQ35jt4R3sa08=</string>
 
 	<!-- Daily. Sparkle still asks the user before the first automatic check. -->
 	<key>SUScheduledCheckInterval</key>
