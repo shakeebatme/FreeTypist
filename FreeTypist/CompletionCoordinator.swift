@@ -646,6 +646,25 @@ final class CompletionCoordinator: ObservableObject {
         // Generating uses the GPU; honour the user's wish to conserve power.
         if preferences.pauseInLowPower, ProcessInfo.processInfo.isLowPowerModeEnabled { return }
 
+        // Something is collecting a password. `FocusedTextReader` refuses to
+        // read anything while that is true, so this exists to say why and to
+        // put down what is already in hand.
+        //
+        // The grace has to go first, and before `clearSuggestion`, which syncs
+        // the hot keys off the back of it. Left armed it keeps swallowing Tab
+        // for up to another 0.9 s — into a password dialog, where Tab is how
+        // you reach the next field. The signature goes for the reason
+        // `handleDisplacement` clears it: the user will come back to this same
+        // text, and an unchanged signature would return above the point where
+        // anything is suggested.
+        if let paused = SecureInput.explanation() {
+            acceptGraceUntil = nil
+            currentSignature = ""
+            clearSuggestion()
+            announce(paused)
+            return
+        }
+
         guard let context = reader.readFocusedText() else {
             Log.core.debug("fastPass: no readable focused text field")
             currentSignature = ""
@@ -1102,7 +1121,8 @@ final class CompletionCoordinator: ObservableObject {
 
     /// True when nothing is standing in the way of a suggestion.
     var isReady: Bool {
-        AXIsProcessTrusted() && preferences.isEnabled && isTapActive && reader.lastLimitation == nil
+        AXIsProcessTrusted() && preferences.isEnabled && isTapActive
+            && reader.lastLimitation == nil && !SecureInput.isActive
     }
 
     /// A one-line answer to "why am I not seeing suggestions?".
@@ -1115,6 +1135,11 @@ final class CompletionCoordinator: ObservableObject {
         }
         if !isTapActive {
             return "Permission is granted but the keyboard tap was refused. Quit and reopen FreeTypist."
+        }
+        // Ahead of the limitation, which is about the app in front; this is
+        // about the whole session and outranks it.
+        if let paused = SecureInput.diagnosis() {
+            return paused
         }
         if let limitation = reader.lastLimitation?.limitation {
             return limitation.detail

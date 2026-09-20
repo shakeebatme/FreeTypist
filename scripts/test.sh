@@ -53,6 +53,12 @@ xcrun swiftc -swift-version 6 \
   -o "$OUT/compatibility"
 "$OUT/compatibility"
 
+echo "==> Secure input"
+xcrun swiftc -swift-version 6 \
+  FreeTypist/SecureInput.swift Tests/SecureInputTests/main.swift \
+  -o "$OUT/secureinput"
+"$OUT/secureinput"
+
 echo "==> Excluded apps"
 xcrun swiftc -swift-version 6 \
   FreeTypist/AppExclusions.swift Tests/ExclusionTests/main.swift \

@@ -65,6 +65,22 @@ final class FocusedTextReader {
     private(set) var lastLimitation: (bundleID: String, limitation: AppCompatibility.Limitation)?
 
     func readFocusedText() -> FocusedTextContext? {
+        // Secure input is on somewhere, so a password is being collected and it
+        // may well be the field under the caret. Refuse before touching
+        // Accessibility at all: the subrole check further down only sees
+        // AppKit's own secure fields, and the cases that matter most — a web
+        // login form, an Electron password box, a terminal at a `sudo` prompt —
+        // carry no subrole while turning secure input on.
+        //
+        // The reason for silence is the system state rather than this app, so
+        // the last incompatible app's explanation must not be left standing:
+        // `CompletionCoordinator` puts `lastLimitation` straight into the
+        // status line, and it has its own sentence for this.
+        if SecureInput.isActive {
+            lastLimitation = nil
+            return nil
+        }
+
         guard let element = focusedElement() else { return nil }
 
         // One lookup, used four times below. `NSRunningApplication` is a real
