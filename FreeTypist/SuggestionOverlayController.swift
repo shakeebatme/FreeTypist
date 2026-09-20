@@ -15,6 +15,16 @@ import AppKit
 @MainActor
 final class SuggestionOverlayController {
 
+    /// The counter shown beside a suggestion that is one of several.
+    ///
+    /// Nil for the ordinary case of a single suggestion, so nothing is drawn
+    /// where nothing is being chosen between — a lone "1 of 1" would be noise
+    /// on every completion.
+    static func positionBadge(index: Int, total: Int) -> String? {
+        guard total > 1, index >= 0, index < total else { return nil }
+        return "\(index + 1)/\(total)"
+    }
+
     /// Which of the three ways to show a suggestion fits what is on screen.
     ///
     /// Pure and separate from the drawing, because the rule is the part worth
@@ -139,7 +149,8 @@ final class SuggestionOverlayController {
         textColor: NSColor?,
         ghostColor: NSColor? = nil,
         strikeRect: CGRect? = nil,
-        atLineEnd: Bool
+        atLineEnd: Bool,
+        badge: String? = nil
     ) {
         guard !suggestion.isEmpty else {
             hide()
@@ -162,10 +173,10 @@ final class SuggestionOverlayController {
         case .inline:
             if let caretRect {
                 showInline(suggestion, at: caretRect, font: font,
-                           textColor: textColor, ghostColor: ghostColor)
+                           textColor: textColor, ghostColor: ghostColor, badge: badge)
             }
         case .pill:
-            showPill(suggestion, at: caretRect)
+            showPill(suggestion, at: caretRect, badge: badge)
         }
         isVisible = true
     }
@@ -229,7 +240,8 @@ final class SuggestionOverlayController {
         at caretRect: CGRect,
         font: NSFont?,
         textColor: NSColor?,
-        ghostColor: NSColor?
+        ghostColor: NSColor?,
+        badge: String?
     ) {
         pillPanel.orderOut(nil)
 
@@ -245,14 +257,33 @@ final class SuggestionOverlayController {
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let available = max(40, visible.maxX - caretRect.minX - 6)
 
+        // Drawn as a second run rather than as more ghost text: smaller, and in
+        // the system font rather than the app's, so it reads as a label about
+        // the suggestion instead of as words waiting to be accepted. A counter
+        // that looked insertable would be the worst possible thing to put at
+        // the end of text the user is about to press Tab on.
+        var badgeRun: NSAttributedString?
+        if let badge {
+            let size = max(9, resolvedFont.pointSize * 0.75)
+            badgeRun = NSAttributedString(string: "  \(badge)", attributes: [
+                .font: NSFont.systemFont(ofSize: size, weight: .medium),
+                .foregroundColor: resolved.withAlphaComponent(0.75),
+            ])
+        }
+
+        // Fitted against what is left after the counter, so truncation eats the
+        // suggestion and never the label saying there are others.
         let attributed = Self.fit(
             suggestion.text.replacingOccurrences(of: "\n", with: " "),
             font: resolvedFont,
             color: resolved,
-            maxWidth: available
+            maxWidth: available - (badgeRun?.size().width ?? 0)
         )
 
-        let size = attributed.size()
+        let composed = NSMutableAttributedString(attributedString: attributed)
+        if let badgeRun { composed.append(badgeRun) }
+
+        let size = composed.size()
         let height = max(caretRect.height, ceil(size.height))
         let frame = NSRect(
             x: caretRect.minX,
@@ -261,7 +292,7 @@ final class SuggestionOverlayController {
             height: height
         )
 
-        ghost.attributed = attributed
+        ghost.attributed = composed
         ghost.textOrigin = .zero
         ghost.strikeThrough = nil
         inlinePanel.setFrame(frame, display: false)
@@ -295,11 +326,28 @@ final class SuggestionOverlayController {
 
     // MARK: - Pill
 
-    private func showPill(_ suggestion: Suggestion, at caretRect: CGRect?) {
+    private func showPill(_ suggestion: Suggestion, at caretRect: CGRect?, badge: String?) {
         inlinePanel.orderOut(nil)
 
-        pillLabel.stringValue = suggestion.text.replacingOccurrences(of: "\n", with: " ")
-        pillLabel.textColor = suggestion.isCorrection ? .systemBlue : .labelColor
+        let text = suggestion.text.replacingOccurrences(of: "\n", with: " ")
+        let colour: NSColor = suggestion.isCorrection ? .systemBlue : .labelColor
+        if let badge {
+            // The pill's own badge already says "tab"; this goes on the label,
+            // which sizes the pill, so the counter cannot be clipped by the
+            // fixed-width badge beside it.
+            let composed = NSMutableAttributedString(
+                string: text,
+                attributes: [.font: pillLabel.font as Any, .foregroundColor: colour]
+            )
+            composed.append(NSAttributedString(string: "  \(badge)", attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]))
+            pillLabel.attributedStringValue = composed
+        } else {
+            pillLabel.stringValue = text
+            pillLabel.textColor = colour
+        }
 
         let width = min(max(90, pillLabel.attributedStringValue.size().width + 48), 420)
         let size = NSSize(width: width, height: 26)

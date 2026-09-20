@@ -69,5 +69,28 @@ for caret in [true, false] {
     }
 }
 
+// MARK: The counter beside a suggestion that is one of several
+
+typealias Overlay = SuggestionOverlayController
+
+// A lone suggestion is not one of several, and "1 of 1" on every completion
+// would be noise at the caret.
+check("a single suggestion carries no counter",
+      Overlay.positionBadge(index: 0, total: 1) == nil)
+check("no suggestions carry no counter",
+      Overlay.positionBadge(index: 0, total: 0) == nil)
+
+check("the counter is one-based", Overlay.positionBadge(index: 0, total: 3) == "1/3")
+check("the second of three reads 2/3", Overlay.positionBadge(index: 1, total: 3) == "2/3")
+check("the last of three reads 3/3", Overlay.positionBadge(index: 2, total: 3) == "3/3")
+
+// Cycling is modular, so an index can only ever be in range — but a counter
+// that read "4/3" would be worse than none, so it is refused rather than
+// trusted.
+check("an index past the end carries no counter",
+      Overlay.positionBadge(index: 3, total: 3) == nil)
+check("a negative index carries no counter",
+      Overlay.positionBadge(index: -1, total: 3) == nil)
+
 print(failures == 0 ? "\nAll presentation cases passed." : "\n\(failures) FAILED")
 exit(failures == 0 ? 0 : 1)

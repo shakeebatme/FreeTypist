@@ -1025,7 +1025,13 @@ final class CompletionCoordinator: ObservableObject {
             // at all, asked again here because it decides something different:
             // there, whether to suggest; here, whether ghost text at the caret
             // would be drawn on top of the user's own words.
-            atLineEnd: Self.isAtLineEnd(context.textAfterCursor)
+            atLineEnd: Self.isAtLineEnd(context.textAfterCursor),
+            // Computed here rather than passed in, so every path that presents
+            // gets it — including the redraw after a scroll, where the counter
+            // has to come back with the suggestion it belongs to.
+            badge: SuggestionOverlayController.positionBadge(
+                index: candidateIndex, total: candidates.count
+            )
         )
         syncHotKeys()
     }
