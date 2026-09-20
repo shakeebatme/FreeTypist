@@ -31,6 +31,7 @@ struct Shortcut: Codable, Equatable, Sendable {
     static let tab: Int64 = 48
     static let escape: Int64 = 53
     static let grave: Int64 = 50
+    static let downArrow: Int64 = 125
 
     var flags: CGEventFlags { CGEventFlags(rawValue: modifiers) }
 
@@ -105,6 +106,7 @@ struct Shortcut: Codable, Equatable, Sendable {
 enum ShortcutAction: String, CaseIterable, Codable, Sendable {
     case nextWord
     case fullCompletion
+    case nextAlternative
     case forceActivate
     case toggleCurrentApp
     case toggleGlobally
@@ -113,6 +115,7 @@ enum ShortcutAction: String, CaseIterable, Codable, Sendable {
         switch self {
         case .nextWord: "Complete only the next word"
         case .fullCompletion: "Trigger full completion"
+        case .nextAlternative: "Show another suggestion"
         case .forceActivate: "Force-activate completions"
         case .toggleCurrentApp: "Exclude the current app for 10 minutes"
         case .toggleGlobally: "Exclude all apps"
@@ -125,6 +128,8 @@ enum ShortcutAction: String, CaseIterable, Codable, Sendable {
             "Often only a suggestion's first words are what you meant. Press this repeatedly to take them one at a time."
         case .fullCompletion:
             "Accepts the whole suggestion at once. The key above Tab works well, since it is close by and rarely typed mid-sentence."
+        case .nextAlternative:
+            "Replaces the suggestion on screen with the next-best one, and cycles back to the first at the end. The model is only asked for the others the first time you press this, so the first press takes a moment."
         case .forceActivate:
             "Asks for a suggestion immediately, for the times FreeTypist cannot tell you have started typing."
         case .toggleCurrentApp:
@@ -138,6 +143,9 @@ enum ShortcutAction: String, CaseIterable, Codable, Sendable {
         switch self {
         case .nextWord: Shortcut(keyCode: Shortcut.tab)
         case .fullCompletion: Shortcut(keyCode: Shortcut.grave)
+        // Needs a modifier: this is only ever registered as a Carbon hot key,
+        // and a bare arrow key would be taken from every app on the Mac.
+        case .nextAlternative: Shortcut(keyCode: Shortcut.downArrow, modifiers: .maskAlternate)
         case .forceActivate: Shortcut(keyCode: Shortcut.grave, modifiers: .maskControl)
         case .toggleCurrentApp:
             Shortcut(keyCode: Shortcut.grave, modifiers: [.maskControl, .maskAlternate, .maskCommand])
@@ -157,6 +165,7 @@ extension ShortcutAction {
         case .forceActivate: 3
         case .toggleCurrentApp: 4
         case .toggleGlobally: 5
+        case .nextAlternative: 6
         }
     }
 

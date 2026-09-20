@@ -60,6 +60,7 @@ FreeTypist then lives in the menu bar. If suggestions don't appear, open
 | --- | --- |
 | `Tab` | Accept the next word |
 | `` ` `` (the key above Tab) | Accept the whole suggestion |
+| `` ⌥↓ `` | Show another suggestion |
 | `Esc` | Dismiss the suggestion, or pause briefly (your choice) |
 | `` ⌃` `` | Ask for a suggestion right now |
 | `` ⌃⌥⌘` `` | Exclude the current app for 10 minutes; press again to undo |
@@ -67,6 +68,10 @@ FreeTypist then lives in the menu bar. If suggestions don't appear, open
 Every shortcut can be changed in **Settings › Shortcuts**, and one for
 excluding all apps can be added there. Keys that aren't needed pass through as
 normal: pressing `` ` `` with no suggestion showing just types a backtick.
+
+**Other suggestions:** press `` ⌥↓ `` and the suggestion is replaced by the
+next-best one, cycling back to the first at the end. The model is only asked
+for the others the first time you press it, so that press takes a moment.
 
 **Emoji:** type a colon and a name, such as `:rocket`, and the emoji is offered
 inline.

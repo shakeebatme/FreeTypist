@@ -57,6 +57,20 @@ final class CompletionCoordinator: ObservableObject {
 
     private var currentSuggestion: Suggestion?
     private var currentElement: AXUIElement?
+
+    /// Other continuations for the caret currently showing, and which of them
+    /// is on screen. Empty until the user asks: the model is not run three
+    /// times for a suggestion nobody wanted to look past.
+    private var candidates: [Suggestion] = []
+    private var candidateIndex = 0
+    /// The request that produced the suggestion showing, kept so the others can
+    /// be asked for against exactly the same context. Rebuilding it later would
+    /// re-read the screen and the clipboard, which by then describe a different
+    /// moment.
+    private var candidateRequest: CompletionRequest?
+    private var candidateTask: Task<Void, Never>?
+    /// How many to offer in all, the one on screen included.
+    private let candidateCount = 3
     /// Editing state we have already answered for.
     private var currentSignature = ""
     /// True when the caret was last seen scrolled out of its field's viewport.
@@ -375,6 +389,12 @@ final class CompletionCoordinator: ObservableObject {
             if haveSomethingToAccept, let shortcut = shortcuts.shortcut(for: .fullCompletion) {
                 wanted[.fullCompletion] = shortcut
             }
+            // Only while a suggestion is actually showing, for the same reason:
+            // registered, the chord is taken from the app underneath, and
+            // Option-Down moves the caret in most editors.
+            if currentSuggestion != nil, let shortcut = shortcuts.shortcut(for: .nextAlternative) {
+                wanted[.nextAlternative] = shortcut
+            }
         }
         return wanted
     }
@@ -466,6 +486,12 @@ final class CompletionCoordinator: ObservableObject {
             // type a backtick.
             guard currentSuggestion != nil else { return false }
             accept(.whole)
+            return true
+
+        case .nextAlternative:
+            // Nothing on screen to replace.
+            guard currentSuggestion != nil, !caretOutOfView else { return false }
+            cycleAlternative()
             return true
 
         case .forceActivate:
@@ -623,6 +649,68 @@ final class CompletionCoordinator: ObservableObject {
             self.syncHotKeys()
             self.scheduleFastPass()
         }
+    }
+
+    // MARK: - Alternatives
+
+    /// Puts the next candidate on screen, asking the model for them the first
+    /// time.
+    private func cycleAlternative() {
+        guard !candidates.isEmpty else {
+            fetchAlternatives()
+            return
+        }
+        candidateIndex = (candidateIndex + 1) % candidates.count
+        showCandidate()
+    }
+
+    /// Asks for the whole ranked list, the one already showing included.
+    ///
+    /// The list is asked for as a list rather than as "the others" because the
+    /// backend has to know which openings to avoid, and that means knowing what
+    /// the first answer was. Its first entry should therefore be what is
+    /// already on screen, and if it is not — a different model, a changed
+    /// bias — the list is still right and simply starts where it starts.
+    private func fetchAlternatives() {
+        guard candidateTask == nil, let model, let request = candidateRequest else { return }
+        let signature = currentSignature
+
+        announce("Looking for other suggestions…")
+        candidateTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.candidateTask = nil }
+
+            let texts = await model.completions(request, count: self.candidateCount)
+            // The caret has to still be where it was. Anything else and these
+            // continue a sentence that has moved on.
+            guard !Task.isCancelled, self.currentSignature == signature,
+                  let now = self.reader.readFocusedText(), now.signature == signature else { return }
+            guard texts.count > 1 else {
+                self.announce("No other suggestion here.")
+                return
+            }
+
+            self.candidates = texts.map { Suggestion(text: $0, source: .model) }
+            self.candidateIndex = 1
+            self.showCandidate()
+        }
+    }
+
+    private func showCandidate() {
+        guard candidates.indices.contains(candidateIndex),
+              let context = reader.readFocusedText(),
+              context.signature == currentSignature else { return }
+        announce("Suggestion \(candidateIndex + 1) of \(candidates.count)")
+        present(candidates[candidateIndex], in: context)
+    }
+
+    /// Called wherever the suggestion stops being the one these belong to.
+    private func dropAlternatives() {
+        candidateTask?.cancel()
+        candidateTask = nil
+        candidates = []
+        candidateIndex = 0
+        candidateRequest = nil
     }
 
     // MARK: - Suggestion pipeline
@@ -802,6 +890,9 @@ final class CompletionCoordinator: ObservableObject {
     private func scheduleModelPass(before: String, after: String, appName: String?, signature: String) {
         let maxWords = preferences.maxWords
         modelTask?.cancel()
+        // The text has moved on, so anything gathered for the old caret is
+        // about a sentence that no longer exists.
+        dropAlternatives()
         guard preferences.useModel, let model, modelStatus.isReady else { return }
         // Mirrors `CompletionRequest.hasEnoughContext`, which is the backend's
         // own floor: a bare "Hi " is under it, and is exactly when a name is
@@ -843,6 +934,7 @@ final class CompletionCoordinator: ObservableObject {
             )
             Log.core.notice("personalization phrasing=\(self.personalizationSnapshot.recentPhrasing.count, privacy: .public) vocab=\(self.personalizationSnapshot.vocabulary.count, privacy: .public) bias=\(String(format: "%.2f", self.preferences.wordChoiceStrength), privacy: .public)")
             let started = Date()
+            self.candidateRequest = request
             let text = await model.complete(request)
             // Timed here rather than inside the backend, so the number stays
             // true of whatever engine is behind the protocol. A cancelled pass
@@ -947,6 +1039,7 @@ final class CompletionCoordinator: ObservableObject {
 
     private func clearSuggestion() {
         repositionTask?.cancel()
+        dropAlternatives()
         currentSuggestion = nil
         caretOutOfView = false
         overlay.hide()
