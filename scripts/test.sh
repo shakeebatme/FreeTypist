@@ -40,6 +40,12 @@ xcrun swiftc -swift-version 6 \
   -o "$OUT/shortcuts"
 "$OUT/shortcuts"
 
+echo "==> Latency window"
+xcrun swiftc -swift-version 6 \
+  FreeTypist/LatencyStats.swift Tests/LatencyTests/main.swift \
+  -o "$OUT/latency"
+"$OUT/latency"
+
 echo "==> Suggestion presentation"
 xcrun swiftc -swift-version 6 \
   FreeTypist/SuggestionOverlayController.swift FreeTypist/Suggestion.swift \

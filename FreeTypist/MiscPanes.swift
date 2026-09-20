@@ -90,7 +90,12 @@ struct StatisticsPane: View {
         Section("Statistics") {
             LabeledContent("Suggestions accepted", value: "\(coordinator.acceptedCount)")
             LabeledContent("Words inserted", value: "\(coordinator.acceptedWords)")
-            Text("Counted since FreeTypist last started. Nothing is sent anywhere.")
+            LabeledContent("Suggestion speed", value: coordinator.latency.summary)
+            Text(coordinator.latency.isEmpty
+                 ? "Counted since FreeTypist last started. Nothing is sent anywhere."
+                 : "Speed is the last \(coordinator.latency.count) suggestions from the model, "
+                   + "not the whole session. Counted since FreeTypist last started, "
+                   + "and nothing is sent anywhere.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

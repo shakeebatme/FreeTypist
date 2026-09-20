@@ -11,6 +11,10 @@ final class CompletionCoordinator: ObservableObject {
     @Published private(set) var acceptedCount = 0
     @Published private(set) var acceptedWords = 0
     @Published private(set) var lastSuggestionText = ""
+    /// How long recent model passes took. Published so the settings row follows
+    /// it; a model pass runs at most a couple of times a second, well under the
+    /// fast pass that `announce` had to be careful about.
+    @Published private(set) var latency = LatencyStats()
     /// What the reader last saw in another app. Reading on demand is
     /// useless here: clicking a button in our own window steals the focus
     /// we would be trying to inspect.
@@ -262,6 +266,10 @@ final class CompletionCoordinator: ObservableObject {
         }
 
         modelStatus = .loading
+        // The window describes an engine, and this is about to be a different
+        // one. Carrying the old numbers over would misreport the swap as a
+        // regression, or hide one.
+        latency.reset()
         await model.load(path: path)
         modelStatus = await model.status()
         Log.core.notice("model status=\(String(describing: self.modelStatus), privacy: .public)")
@@ -834,7 +842,16 @@ final class CompletionCoordinator: ObservableObject {
                 wordChoiceStrength: self.preferences.wordChoiceStrength
             )
             Log.core.notice("personalization phrasing=\(self.personalizationSnapshot.recentPhrasing.count, privacy: .public) vocab=\(self.personalizationSnapshot.vocabulary.count, privacy: .public) bias=\(String(format: "%.2f", self.preferences.wordChoiceStrength), privacy: .public)")
+            let started = Date()
             let text = await model.complete(request)
+            // Timed here rather than inside the backend, so the number stays
+            // true of whatever engine is behind the protocol. A cancelled pass
+            // is not recorded: it was abandoned partway and would report as
+            // fast, dragging the window down exactly when the user is typing
+            // quickly enough to cancel things.
+            if !Task.isCancelled {
+                self.latency.record(Int(Date().timeIntervalSince(started) * 1000))
+            }
 
             Log.core.debug("model returned \(text?.count ?? 0) chars")
             guard !Task.isCancelled, let text, !text.isEmpty else { return }
