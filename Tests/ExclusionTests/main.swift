@@ -16,6 +16,10 @@ let now = Date(timeIntervalSince1970: 1_800_000_000)
 let passwordManagers = [
     "com.apple.keychainaccess", "com.apple.Passwords",
     "com.1password.1password", "com.agilebits.onepassword7",
+    "com.bitwarden.desktop", "com.lastpass.lastpassmacdesktop",
+    "com.keepersecurity.passwordmanager", "com.nordsec.nordpass",
+    "org.keepassxc.keepassxc", "in.sinew.Enpass-Desktop",
+    "me.proton.pass.electron",
 ]
 
 // MARK: Defaults
@@ -28,6 +32,27 @@ for id in passwordManagers {
 check("defaults carry real names", defaults.entries["com.1password.1password"]?.name == "1Password")
 check("the Passwords app is named", defaults.entries["com.apple.Passwords"]?.name == "Passwords")
 check("defaults are all marked as offered", defaults.offeredDefaults == Set(passwordManagers))
+check("no default is listed twice", Set(passwordManagers).count == passwordManagers.count)
+check("the list holds nothing but the defaults",
+      Set(defaults.entries.keys) == Set(passwordManagers))
+
+// The two that are not what they look like. Both were verified against the
+// vendor's own packaging, and both are what a guess gets wrong: NordPass by
+// its product name, Keeper by the company it used to be.
+check("NordPass is under nordsec", defaults.excludes("com.nordsec.nordpass", now: now))
+check("NordPass is not under its product name", !defaults.excludes("com.nordpass.nordpass", now: now))
+check("Keeper is under keepersecurity", defaults.excludes("com.keepersecurity.passwordmanager", now: now))
+check("Keeper is not under callpod", !defaults.excludes("com.callpod.keeperdesktop", now: now))
+
+// A cheap tripwire for a mistyped default. An identifier that is not
+// reverse-DNS cannot be any app's, so it would sit in the list matching
+// nothing while the row still promised the user it was covered.
+for id in passwordManagers {
+    let parts = id.split(separator: ".")
+    check("\(id) looks like a bundle identifier",
+          parts.count >= 3 && !id.contains(" ") && parts.allSatisfy { !$0.isEmpty })
+    check("\(id) carries a name of its own", (defaults.entries[id]?.name ?? "") != id)
+}
 check("an empty list excludes nothing", !AppExclusions().excludes("com.apple.mail", now: now))
 
 // MARK: Spans
@@ -115,11 +140,24 @@ check("a saved old list does not get back defaults it already had",
 check("known apps keep their real name", migrated.entries["com.apple.keychainaccess"]?.name == "Keychain Access")
 check("other apps are named by the lookup", migrated.entries["blocked.app"]?.name == "Name of blocked.app")
 check("a default newer than the old list is added", migrated.entries["com.apple.Passwords"]?.span == .always)
-check("nothing else sneaks in", migrated.entries.count == 5)
+// The defaults that existed while the old format was still in use. Frozen
+// history: a user who removed one of these back then must not have it
+// reinstated, while every default added since has to arrive. Stated as the
+// rule rather than as a count, so adding the next password manager does not
+// falsify a test that was never about how many there are.
+let defaultsAtMigration: Set<String> = [
+    "com.apple.keychainaccess", "com.1password.1password", "com.agilebits.onepassword7",
+]
+let arrivedSinceMigration = Set(passwordManagers).subtracting(defaultsAtMigration)
+
+check("nothing else sneaks in",
+      Set(migrated.entries.keys) == Set([
+          "com.apple.keychainaccess", "blocked.app", "off.app", "unrecorded.app",
+      ]).union(arrivedSinceMigration))
 
 let cleared = AppExclusions.migrating(excluded: [], perAppEnabled: nil, recordingExcluded: nil, name: name)
 check("a list the user emptied gains only what it never had",
-      Set(cleared.entries.keys) == ["com.apple.Passwords"])
+      Set(cleared.entries.keys) == arrivedSinceMigration)
 
 // MARK: Defaults added later
 

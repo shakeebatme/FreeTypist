@@ -66,6 +66,21 @@ struct AppExclusions: Codable, Equatable, Sendable {
     }
 
     /// Password managers, excluded out of the box.
+    ///
+    /// Every identifier here was read from the vendor's own packaging rather
+    /// than recalled — Homebrew's cask metadata, whose `quit` and `zap` stanzas
+    /// carry the real bundle identifier. Two of them are not what they look
+    /// like: NordPass is `com.nordsec.`, not `com.nordpass.`, and Keeper is
+    /// `com.keepersecurity.`, not the `com.callpod.` of its former company
+    /// name. A wrong identifier here is worse than a missing one — the row
+    /// still appears in Excluded Apps, so it reads as a promise being kept
+    /// while it silently matches nothing.
+    ///
+    /// Dashlane and DataVault are deliberately absent: neither ships a current
+    /// macOS app to have an identifier for. Dashlane is a browser extension
+    /// now, and a vault open in a browser tab is covered by `SecureInput`
+    /// rather than by this list — which is the honest division of labour, since
+    /// no bundle-identifier list can see inside a browser at all.
     static let defaults: AppExclusions = {
         var list = AppExclusions()
         list.addNewDefaults()
@@ -77,6 +92,13 @@ struct AppExclusions: Codable, Equatable, Sendable {
         "com.apple.Passwords": Entry(name: "Passwords", span: .always),
         "com.1password.1password": Entry(name: "1Password", span: .always),
         "com.agilebits.onepassword7": Entry(name: "1Password 7", span: .always),
+        "com.bitwarden.desktop": Entry(name: "Bitwarden", span: .always),
+        "com.lastpass.lastpassmacdesktop": Entry(name: "LastPass", span: .always),
+        "com.keepersecurity.passwordmanager": Entry(name: "Keeper", span: .always),
+        "com.nordsec.nordpass": Entry(name: "NordPass", span: .always),
+        "org.keepassxc.keepassxc": Entry(name: "KeePassXC", span: .always),
+        "in.sinew.Enpass-Desktop": Entry(name: "Enpass", span: .always),
+        "me.proton.pass.electron": Entry(name: "Proton Pass", span: .always),
     ]
 
     private static let firstDefaults: Set<String> = [
