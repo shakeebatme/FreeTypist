@@ -39,6 +39,8 @@ actor LlamaBackend: ModelBackend {
     private var lastPromptTokens = 0
     /// Whether the last prompt began with the model's BOS token.
     private var lastPromptBeganWithBOS = false
+    /// Size of the token healing put back on the last generation, 0 for none.
+    private var lastHealedBytes = 0
     /// How often each of the two loop exits that can desynchronise the cache
     /// record has actually fired, for the life of this backend.
     private var degenerateStops = 0
@@ -46,6 +48,22 @@ actor LlamaBackend: ModelBackend {
     /// Rebuilding the sampler is cheap but not free; only do it when the bias
     /// actually changes.
     private var biasSignature = ""
+    /// The same bias the sampler chain carries, kept in a form the healed first
+    /// token can read. That token is chosen from raw logits rather than through
+    /// the chain, so without this copy personalization would be skipped for
+    /// exactly one token per suggestion — the word-initial one, which is the
+    /// only place the bias is aimed.
+    private var biasByToken: [llama_token: Float] = [:]
+
+    /// Every token's bytes, sorted, so the ones extending a given prefix can be
+    /// found by binary search. Built once per model, on first use rather than at
+    /// load: it costs a `llama_token_to_piece` per token across a vocabulary of
+    /// six figures, and warm-up is the first thing that asks for it.
+    private var sortedVocabulary: [(bytes: [UInt8], token: llama_token)]?
+    /// How many healed generations found nothing to extend the prefix and fell
+    /// back. Should stay zero — the removed token always extends itself — so a
+    /// non-zero count means the index and the tokenizer disagree.
+    private var healingFallbacks = 0
 
     init() {
         llama_log_set({ _, _, _ in }, nil)
@@ -88,6 +106,10 @@ actor LlamaBackend: ModelBackend {
         /// than an assumption.
         let degenerateStops: Int
         let decodeFailures: Int
+        /// Bytes of the final prompt token that healing put back for the model
+        /// to choose again, and how often no candidate could be found.
+        let healedBytes: Int
+        let healingFallbacks: Int
 
         var reuseFraction: Double {
             promptTokens > 0 ? Double(shared) / Double(promptTokens) : 0
@@ -104,7 +126,9 @@ actor LlamaBackend: ModelBackend {
             trackedTokens: cachedTokens.count,
             residentTokens: residentTokenCount(),
             degenerateStops: degenerateStops,
-            decodeFailures: decodeFailures
+            decodeFailures: decodeFailures,
+            healedBytes: lastHealedBytes,
+            healingFallbacks: healingFallbacks
         )
     }
 
@@ -185,6 +209,8 @@ actor LlamaBackend: ModelBackend {
         vocab = nil
         loadedPath = nil
         cachedTokens = []
+        sortedVocabulary = nil
+        biasByToken = [:]
         currentStatus = .noModelSelected
     }
 
@@ -253,6 +279,26 @@ actor LlamaBackend: ModelBackend {
             tokens = head + body.dropFirst(dropped)
         }
 
+        // Token healing. A tokenizer splits " available" into one token and
+        // " avail" into another, so a prompt ending mid-word ends on a token
+        // that says the word is *finished*. Conditioned on ` avail`, the model
+        // cannot reach ` available` — that token was never on the table — and
+        // it generates what follows the word "avail" instead. Measured: "I am
+        // avail" came back "ble to answer…", and "any quest" came back "ons".
+        //
+        // So the last token is taken back off the prompt and chosen again, this
+        // time restricted to tokens that *begin with* the bytes it stood for.
+        // The bytes already on screen are then dropped from whatever is picked.
+        // For a word that really was finished this is nearly a no-op: the
+        // removed token extends itself, so it stays a candidate and usually
+        // wins, costing one decode and emitting nothing.
+        var healed: [UInt8] = []
+        if shouldHeal(prompt), let plan = healingPlan(for: tokens) {
+            tokens.removeLast(plan.tokens)
+            healed = plan.bytes
+        }
+        lastHealedBytes = healed.count
+
         // Reuse whatever prefix already sits in the KV cache.
         let shared = sharedPrefixLength(cachedTokens, tokens)
         lastPrefixReuse = shared
@@ -301,6 +347,35 @@ actor LlamaBackend: ModelBackend {
         var output: [UInt8] = []
         var generated: [llama_token] = []
         var produced = 0
+
+        // The healed token, chosen from raw logits over the candidates that
+        // extend what was taken away. Done here rather than through the sampler
+        // chain because the chain has no way to express "only these tokens";
+        // the bias is applied by hand so personalization still reaches the one
+        // token it is aimed at.
+        if !healed.isEmpty {
+            if let chosen = bestToken(extending: healed) {
+                let bytes = pieceBytes(chosen)
+                // Everything past what the user has already typed.
+                output.append(contentsOf: bytes.dropFirst(healed.count))
+                llama_sampler_accept(sampler, chosen)
+                generated.append(chosen)
+                tokens.append(chosen)
+                var single = [chosen]
+                guard single.withUnsafeMutableBufferPointer({ buffer in
+                    llama_decode(context, llama_batch_get_one(buffer.baseAddress, 1)) == 0
+                }) else {
+                    decodeFailures += 1
+                    cachedTokens = []
+                    return String(decoding: output, as: UTF8.self)
+                }
+            } else {
+                // Cannot happen while the index and the tokenizer agree — the
+                // removed token extends itself — so this is counted rather than
+                // handled quietly.
+                healingFallbacks += 1
+            }
+        }
 
         while produced < maxTokens {
             let next = llama_sampler_sample(sampler, context, -1)
@@ -368,6 +443,121 @@ actor LlamaBackend: ModelBackend {
         return false
     }
 
+    // MARK: - Token healing
+
+    /// Whether the prompt ends somewhere a token boundary cannot be trusted.
+    ///
+    /// Only when the last character is alphanumeric. After a space or a full
+    /// stop the tokenizer's split already matches where the user is, there is
+    /// nothing half-written to extend, and healing would only cost a decode.
+    private func shouldHeal(_ prompt: String) -> Bool {
+        guard let last = prompt.last else { return false }
+        return last.isLetter || last.isNumber
+    }
+
+    /// How many tokens to take back off the prompt, and the bytes they spell.
+    ///
+    /// One token is not always enough. A tokenizer splits " document" whole but
+    /// "docum" into ` doc` + `um`, and putting back only `um` leaves ` doc`
+    /// standing: the model picks `um` again and carries on, which is how
+    /// "docum" still came back "documnet" while this healed a single token.
+    ///
+    /// Taking the whole word back is not always right either, because the
+    /// vocabulary may hold nothing that extends it. Nothing begins with
+    /// " resched", so taking back both of its tokens leaves a prefix no
+    /// candidate matches — and the word had already gone from the prompt, so
+    /// the model wrote a different sentence ("we should" -> " send a letter").
+    ///
+    /// So the choice is made here, before anything is decoded, and it is the
+    /// *longest* take-back that still has a candidate. "docum" reaches ` docum`
+    /// and finds ` document`; "resched" falls back to `ched` and finds
+    /// `chedule`. One token always qualifies — a token extends itself — so a
+    /// plan is found whenever there is a word to heal.
+    private func healingPlan(for tokens: [llama_token]) -> (bytes: [UInt8], tokens: Int)? {
+        let cap = 6
+        var bytes: [UInt8] = []
+        var best: (bytes: [UInt8], tokens: Int)?
+        var index = tokens.count - 1
+        var removed = 0
+
+        while index >= 1, removed < cap, bytes.count < 64 {
+            let piece = pieceBytes(tokens[index])
+            // A control token has no printable bytes: nothing to extend, and
+            // not part of any word.
+            guard !piece.isEmpty else { break }
+
+            bytes = piece + bytes
+            removed += 1
+            if !vocabulary(extending: bytes).isEmpty {
+                best = (bytes, removed)
+            }
+
+            // This token opened the word, so the split and the typing agree
+            // again from here.
+            if piece[0] == 0x20 || piece[0] == 0x0A { break }
+            index -= 1
+        }
+        return best
+    }
+
+    /// The highest-scoring token whose bytes start with `prefix`.
+    private func bestToken(extending prefix: [UInt8]) -> llama_token? {
+        guard let context, let logits = llama_get_logits_ith(context, -1) else { return nil }
+
+        var best: llama_token?
+        var bestScore = -Float.infinity
+        for token in vocabulary(extending: prefix) {
+            let score = logits[Int(token)] + (biasByToken[token] ?? 0)
+            if score > bestScore {
+                bestScore = score
+                best = token
+            }
+        }
+        return best
+    }
+
+    /// Every token whose bytes begin with `prefix`.
+    ///
+    /// Sorted bytewise, so they sit in one run and a binary search finds where
+    /// it starts. A linear pass over the whole vocabulary would work too, but it
+    /// would run on every keystroke that lands mid-word.
+    private func vocabulary(extending prefix: [UInt8]) -> [llama_token] {
+        buildVocabularyIndex()
+        guard let sortedVocabulary else { return [] }
+
+        var low = 0
+        var high = sortedVocabulary.count
+        while low < high {
+            let middle = (low + high) / 2
+            if sortedVocabulary[middle].bytes.lexicographicallyPrecedes(prefix) {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+
+        var found: [llama_token] = []
+        var index = low
+        while index < sortedVocabulary.count,
+              sortedVocabulary[index].bytes.starts(with: prefix) {
+            found.append(sortedVocabulary[index].token)
+            index += 1
+        }
+        return found
+    }
+
+    private func buildVocabularyIndex() {
+        guard sortedVocabulary == nil, let vocab else { return }
+        let count = llama_vocab_n_tokens(vocab)
+        var entries: [(bytes: [UInt8], token: llama_token)] = []
+        entries.reserveCapacity(Int(count))
+        for token in 0..<count {
+            entries.append((pieceBytes(token), token))
+        }
+        entries.sort { $0.bytes.lexicographicallyPrecedes($1.bytes) }
+        sortedVocabulary = entries
+    }
+
     private func sharedPrefixLength(_ lhs: [llama_token], _ rhs: [llama_token]) -> Int {
         var index = 0
         while index < lhs.count, index < rhs.count, lhs[index] == rhs[index] { index += 1 }
@@ -415,6 +605,7 @@ actor LlamaBackend: ModelBackend {
                 if let sampler { llama_sampler_free(sampler) }
                 sampler = makeSampler()
                 biasSignature = ""
+                biasByToken = [:]
             }
             return
         }
@@ -461,9 +652,9 @@ actor LlamaBackend: ModelBackend {
             weights[first] = Swift.max(weights[first] ?? 0, strength * base * specificity)
         }
 
-        let entries = weights
-            .filter { $0.value > 0.1 }
-            .map { llama_logit_bias(token: $0.key, bias: Float($0.value)) }
+        let surviving = weights.filter { $0.value > 0.1 }
+        let entries = surviving.map { llama_logit_bias(token: $0.key, bias: Float($0.value)) }
+        biasByToken = surviving.mapValues { Float($0) }
 
         // Rebuilt even when nothing survived the filter — every term tokenized
         // to a bare prefix — because that state *is* "no bias", the same as the
