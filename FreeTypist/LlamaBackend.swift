@@ -41,6 +41,10 @@ actor LlamaBackend: ModelBackend {
     private var lastPromptBeganWithBOS = false
     /// Size of the token healing put back on the last generation, 0 for none.
     private var lastHealedBytes = 0
+    /// The token the last generation opened with, so `alternatives` can forbid
+    /// it next time round. Read from the generation rather than from its text,
+    /// which the sanitizer may have rewritten.
+    private var lastFirstToken: llama_token?
     /// How often each of the two loop exits that can desynchronise the cache
     /// record has actually fired, for the life of this backend.
     private var degenerateStops = 0
@@ -243,9 +247,86 @@ actor LlamaBackend: ModelBackend {
         )
     }
 
+    /// Ranked continuations for the same caret, best first.
+    ///
+    /// Each pass forbids the openings already used, so what differs is the
+    /// first word and everything after follows from it. The prompt is already
+    /// resident, so an extra candidate pays for its own generation and not for
+    /// the prefill again — measured, three candidates cost about 2.7 times one,
+    /// not three. A real saving, and a smaller one than it sounds: at six words
+    /// the generation is most of the cost, and only the prefill is shared.
+    ///
+    /// Forbidding a *token* is not the same as offering something different to
+    /// read. " busy" and " b" + "usy" are different openings to the model and
+    /// the same word to the user, and the second spelling came back as
+    /// "busy with work and family. I" against the first's "…I am". So a
+    /// candidate also has to open on a word not already offered, and there are
+    /// a few spare attempts to find one.
+    ///
+    /// Fewer than `count` come back when the model is sure. Every spare attempt
+    /// on "Apologies for the delay, I have been" opened on "busy", so one
+    /// suggestion is returned rather than three that read alike — which is the
+    /// answer, not a shortfall.
+    ///
+    /// The cache is left holding the last candidate rather than the first. The
+    /// record follows it, so nothing is inconsistent; the next keystroke simply
+    /// reuses a little less, which is the right trade for something the user
+    /// asked for and does not do on every keystroke.
+    func completions(_ request: CompletionRequest, count: Int) async -> [String] {
+        guard currentStatus.isReady, context != nil, vocab != nil else { return [] }
+        guard request.hasEnoughContext, count > 0 else { return [] }
+
+        updateBias(vocabulary: request.vocabulary, strength: request.wordChoiceStrength)
+        let prompt = CompletionPrompt.text(for: request)
+
+        var excluded: Set<llama_token> = []
+        var openings: Set<String> = []
+        var found: [String] = []
+
+        for _ in 0..<(count + 3) {
+            guard found.count < count, !Task.isCancelled else { break }
+
+            guard let raw = generate(
+                prompt: prompt,
+                maxTokens: request.tokenBudget,
+                maxWords: request.maxWords,
+                excludingFirst: excluded
+            ) else { break }
+
+            // Forbidden for the next round whatever becomes of the text, or a
+            // candidate the sanitizer rejects would be generated again and
+            // again until the attempts ran out.
+            if let opening = lastFirstToken { excluded.insert(opening) }
+            guard !raw.isEmpty else { continue }
+
+            guard let clean = CompletionSanitizer.sanitize(
+                raw,
+                before: request.before,
+                needsLeadingSpace: request.needsLeadingSpace
+            ), !clean.isEmpty else { continue }
+
+            let word = clean
+                .split(whereSeparator: { $0.isWhitespace })
+                .first
+                .map { String($0).lowercased() } ?? clean.lowercased()
+            guard openings.insert(word).inserted else { continue }
+            found.append(clean)
+        }
+        return found
+    }
+
     // MARK: - Generation
 
-    private func generate(prompt: String, maxTokens: Int, maxWords: Int) -> String? {
+    /// - Parameter excludingFirst: tokens the continuation may not open with.
+    ///   This is what makes alternatives possible: run the same prompt again,
+    ///   forbidding the openings already offered, and the cache reuse means
+    ///   only the divergence is decoded.
+    private func generate(
+        prompt: String,
+        maxTokens: Int,
+        maxWords: Int,
+        excludingFirst: Set<llama_token> = []
+    ) -> String? {
         guard let context, let vocab, let sampler else { return nil }
 
         // Always, not only when the cache is empty. What is tokenized here is
@@ -348,33 +429,49 @@ actor LlamaBackend: ModelBackend {
         var generated: [llama_token] = []
         var produced = 0
 
-        // The healed token, chosen from raw logits over the candidates that
-        // extend what was taken away. Done here rather than through the sampler
-        // chain because the chain has no way to express "only these tokens";
-        // the bias is applied by hand so personalization still reaches the one
+        // The first token is chosen from raw logits rather than through the
+        // sampler chain, healed or not, because the chain has no way to say
+        // "only these" — which both healing and alternatives need. The bias is
+        // applied by hand so personalization still reaches the word-initial
         // token it is aimed at.
-        if !healed.isEmpty {
-            if let chosen = bestToken(extending: healed) {
-                let bytes = pieceBytes(chosen)
-                // Everything past what the user has already typed.
-                output.append(contentsOf: bytes.dropFirst(healed.count))
-                llama_sampler_accept(sampler, chosen)
-                generated.append(chosen)
-                tokens.append(chosen)
-                var single = [chosen]
-                guard single.withUnsafeMutableBufferPointer({ buffer in
-                    llama_decode(context, llama_batch_get_one(buffer.baseAddress, 1)) == 0
-                }) else {
-                    decodeFailures += 1
-                    cachedTokens = []
-                    return String(decoding: output, as: UTF8.self)
-                }
-            } else {
-                // Cannot happen while the index and the tokenizer agree — the
-                // removed token extends itself — so this is counted rather than
-                // handled quietly.
-                healingFallbacks += 1
+        //
+        // This is the same answer the chain gave before. `llama_sampler_reset`
+        // has just cleared the penalty window, so at this one position the
+        // chain is a logit bias followed by greedy — which is argmax over
+        // logits plus bias, exactly what `bestToken` computes.
+        lastFirstToken = nil
+        if let chosen = bestToken(extending: healed, excluding: excludingFirst) {
+            lastFirstToken = chosen
+            let bytes = pieceBytes(chosen)
+            // Everything past what the user has already typed. `healed` is
+            // empty when nothing was taken back, so this is the whole token.
+            var emitted = Array(bytes.dropFirst(healed.count))
+            // A newline ends the suggestion here as it does in the loop below.
+            if let newline = emitted.firstIndex(of: 0x0A) {
+                emitted = Array(emitted[..<newline])
+                output.append(contentsOf: emitted)
+                cachedTokens = tokens
+                return String(decoding: output, as: UTF8.self)
             }
+            output.append(contentsOf: emitted)
+
+            llama_sampler_accept(sampler, chosen)
+            generated.append(chosen)
+            tokens.append(chosen)
+            produced += 1
+            var single = [chosen]
+            guard single.withUnsafeMutableBufferPointer({ buffer in
+                llama_decode(context, llama_batch_get_one(buffer.baseAddress, 1)) == 0
+            }) else {
+                decodeFailures += 1
+                cachedTokens = []
+                return String(decoding: output, as: UTF8.self)
+            }
+        } else if !healed.isEmpty {
+            // Cannot happen while the index and the tokenizer agree — the
+            // removed token extends itself — so this is counted rather than
+            // handled quietly.
+            healingFallbacks += 1
         }
 
         while produced < maxTokens {
@@ -500,19 +597,39 @@ actor LlamaBackend: ModelBackend {
         return best
     }
 
-    /// The highest-scoring token whose bytes start with `prefix`.
-    private func bestToken(extending prefix: [UInt8]) -> llama_token? {
-        guard let context, let logits = llama_get_logits_ith(context, -1) else { return nil }
+    /// The highest-scoring token whose bytes start with `prefix`, skipping any
+    /// in `excluding`.
+    ///
+    /// An empty prefix means the whole vocabulary, which is the case where
+    /// nothing was healed: the caret is after a space or a full stop and any
+    /// token may open the continuation.
+    private func bestToken(extending prefix: [UInt8], excluding: Set<llama_token>) -> llama_token? {
+        guard let context, let vocab,
+              let logits = llama_get_logits_ith(context, -1) else { return nil }
 
         var best: llama_token?
         var bestScore = -Float.infinity
-        for token in vocabulary(extending: prefix) {
+        func consider(_ token: llama_token) {
+            guard !excluding.contains(token) else { return }
             let score = logits[Int(token)] + (biasByToken[token] ?? 0)
             if score > bestScore {
                 bestScore = score
                 best = token
             }
         }
+
+        if prefix.isEmpty {
+            for token in 0..<llama_vocab_n_tokens(vocab) { consider(token) }
+        } else {
+            for token in vocabulary(extending: prefix) { consider(token) }
+        }
+
+        // End-of-generation winning means the model has nothing to add here, so
+        // there is no suggestion — not that the next-best token should be
+        // pressed into service. It is scored rather than skipped for exactly
+        // that reason: skipping it would hand back noise whenever the honest
+        // answer was silence, and the old loop stopped on it too.
+        if let best, llama_vocab_is_eog(vocab, best) { return nil }
         return best
     }
 

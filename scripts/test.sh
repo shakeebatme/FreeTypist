@@ -160,6 +160,12 @@ if [ -f "$MODEL" ]; then
     "${ENGINE[@]}" Tests/HealingTests/main.swift -o "$OUT/healing"
   "$OUT/healing" "$MODEL" 2>/dev/null
 
+  echo "==> Alternatives"
+  xcrun swiftc -swift-version 6 -O -F "$FW" -framework llama \
+    -Xlinker -rpath -Xlinker "$FW" \
+    "${ENGINE[@]}" Tests/AlternativesTests/main.swift -o "$OUT/alternatives"
+  "$OUT/alternatives" "$MODEL" 2>/dev/null | grep -E "^PASS|^FAIL|ms ·|verified|FAILED"
+
   echo "==> KV-cache reuse"
   xcrun swiftc -swift-version 6 -O -F "$FW" -framework llama \
     -Xlinker -rpath -Xlinker "$FW" \
@@ -168,5 +174,6 @@ if [ -f "$MODEL" ]; then
 else
   echo "==> Word-choice bias (skipped: no model downloaded)"
   echo "==> Token healing (skipped: no model downloaded)"
+  echo "==> Alternatives (skipped: no model downloaded)"
   echo "==> KV-cache reuse (skipped: no model downloaded)"
 fi
