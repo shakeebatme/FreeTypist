@@ -24,6 +24,15 @@ xcrun swiftc -swift-version 6 \
   -o "$OUT/spell"
 "$OUT/spell"
 
+echo "==> Heuristics"
+xcrun swiftc -swift-version 6 \
+  FreeTypist/HeuristicProvider.swift \
+  FreeTypist/Suggestion.swift \
+  FreeTypist/WordBoundary.swift \
+  Tests/HeuristicTests/main.swift \
+  -o "$OUT/heuristics"
+"$OUT/heuristics"
+
 echo "==> Shortcuts"
 xcrun swiftc -swift-version 6 \
   FreeTypist/Shortcut.swift FreeTypist/KeyEventTap.swift FreeTypist/Suggestion.swift \

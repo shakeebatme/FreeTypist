@@ -35,47 +35,58 @@ done
 # Match by SHA-1, not by name. Six certificates share one name on this machine
 # and five are revoked, so letting `head -1` of a name grep decide is a coin toss.
 #
-# Developer ID wins when present: it is the only identity notarization accepts,
-# and picking the development certificate for a release would produce a build
-# that cannot be notarized and whose identity differs from every shipped copy.
+# Only Developer ID is accepted. An Apple Development certificate looks just as
+# valid here and produces a bundle no other Mac will launch: a development-signed
+# Mac app needs an embedded provisioning profile, and with none AMFI refuses the
+# launch and macOS moves the bundle to the Trash. Ad-hoc is better on both
+# counts — it installs locally and it survives the trip to another Mac — so
+# falling back to the development certificate is never the right answer.
 IDENTITY="${FREETYPIST_IDENTITY:-}"
 if [ -z "$IDENTITY" ]; then
-  VALID=$(security find-identity -v -p codesigning 2>/dev/null \
-    | grep -v CSSMERR_TP_CERT_REVOKED)
-  IDENTITY=$(echo "$VALID" | grep "Developer ID Application" \
+  IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+    | grep -v CSSMERR_TP_CERT_REVOKED \
+    | grep "Developer ID Application" \
     | grep -oE '[0-9A-F]{40}' | head -1)
-  if [ -z "$IDENTITY" ]; then
-    IDENTITY=$(echo "$VALID" | grep -oE '[0-9A-F]{40}' | head -1)
-  fi
 fi
 if [ -z "$IDENTITY" ]; then
   if [ "$ADHOC_OK" -eq 1 ]; then
     IDENTITY="-"
   else
-    echo "No usable code signing identity found." >&2
-    echo "Set FREETYPIST_IDENTITY to a SHA-1 from: security find-identity -v -p codesigning" >&2
+    echo "No Developer ID Application certificate found." >&2
+    echo "Notarized builds need one. For an unnotarized build, pass --adhoc-ok." >&2
+    echo "Or set FREETYPIST_IDENTITY to a SHA-1 from: security find-identity -v -p codesigning" >&2
     exit 1
   fi
 fi
 
 if [ "$IDENTITY_ONLY" -eq 1 ]; then
-  echo "$IDENTITY"
+  # `printf`, not `echo`: zsh's builtin echo eats a lone "-" and prints an empty
+  # line, so the ad-hoc answer would reach the caller as no answer at all.
+  printf '%s\n' "$IDENTITY"
   exit 0
 fi
 
 [ -n "$APP" ] && [ -d "$APP" ] || { echo "Usage: sign-app.sh [options] <path to .app>" >&2; exit 1; }
 
 # `--options runtime` is the hardened runtime, which notarization requires. It
-# is applied to local builds too: llama's Metal backend compiles its shaders at
-# runtime, and if that were ever to break under the hardened runtime it should
-# break on this machine rather than in somebody's download.
+# is applied to signed local builds too: llama's Metal backend compiles its
+# shaders at runtime, and if that were ever to break under the hardened runtime
+# it should break on this machine rather than in somebody's download.
 #
-# A secure timestamp needs the network, which a local install should not.
-if [ "$TIMESTAMP" -eq 1 ]; then
-  FLAGS=(--force --timestamp --options runtime --sign "$IDENTITY")
-else
-  FLAGS=(--force --options runtime --sign "$IDENTITY")
+# It must not be applied to an ad-hoc signature. The hardened runtime turns on
+# library validation, which requires every loaded library to share the main
+# binary's team identifier — and an ad-hoc signature has no team at all. The app
+# is then refused its own llama framework and dies in dyld before main. A secure
+# timestamp wants a real certificate too, and needs the network, which a local
+# install should not. Neither is a loss: an ad-hoc build cannot be notarized.
+FLAGS=(--force)
+if [ "$IDENTITY" != "-" ]; then
+  FLAGS+=(--options runtime)
+  if [ "$TIMESTAMP" -eq 1 ]; then
+    FLAGS+=(--timestamp)
+  fi
 fi
+FLAGS+=(--sign "$IDENTITY")
 
 sign() { codesign $FLAGS "$@" }
 

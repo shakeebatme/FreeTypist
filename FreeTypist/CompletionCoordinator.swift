@@ -45,6 +45,7 @@ final class CompletionCoordinator: ObservableObject {
     private let overlay: SuggestionOverlayController
     private let preferences: Preferences
     private let tap = KeyEventTap()
+    private let hotKeys = HotKeyMonitor()
     private let changes = AXChangeObserver()
     /// Lent to `TextInsertionService` so it can wait to be told an insertion
     /// landed rather than re-reading the field on a timer.
@@ -128,6 +129,12 @@ final class CompletionCoordinator: ObservableObject {
         tap.onKeyDown = { [weak self] stroke in
             self?.handle(stroke) ?? .pass
         }
+        // A hot key has already swallowed its key by the time this runs, so
+        // unlike the tap there is no disposition to return. `wantedHotKeys` is
+        // what keeps that honest.
+        hotKeys.onAction = { [weak self] action in
+            _ = self?.perform(action)
+        }
         // Debounced on purpose: these arrive several times per keystroke.
         changes.onChange = { [weak self] in self?.scheduleFastPass() }
         changes.onDisplacement = { [weak self] kind in self?.handleDisplacement(kind) }
@@ -164,6 +171,7 @@ final class CompletionCoordinator: ObservableObject {
     /// Tab still works for navigation and indentation the rest of the time.
     private var acceptGraceUntil: Date?
     private let acceptGrace: TimeInterval = 0.9
+    private var graceResyncTimer: Timer?
 
     /// Apps that keep refusing insertions, and until when to leave them alone.
     ///
@@ -233,6 +241,7 @@ final class CompletionCoordinator: ObservableObject {
             syncPermissionState()
         } else {
             tap.stop()
+            hotKeys.stop()
             isTapActive = false
             clearSuggestion()
             announce("Suggestions are off.")
@@ -277,6 +286,8 @@ final class CompletionCoordinator: ObservableObject {
     /// different field, switching apps, or granting permission while we run.
     private func tick() {
         syncPermissionState()
+        // Also catches a rebinding made in Settings since the last pass.
+        syncHotKeys()
         guard preferences.isEnabled, isTapActive else { return }
         runFastPass()
     }
@@ -315,6 +326,67 @@ final class CompletionCoordinator: ObservableObject {
             announce("Waiting for Accessibility permission.")
         }
         isTapActive = tap.isRunning
+    }
+
+    // MARK: - Hot keys
+
+    /// Which shortcuts should be registered as Carbon hot keys right now.
+    ///
+    /// This exists because a hot key is unconditional. Once registered it
+    /// swallows its key, and Carbon offers no way to hand one back the way the
+    /// tap does by returning `.pass`. So a key is only registered while
+    /// `perform` is certain to act on it, and the guards below have to track
+    /// the ones in `perform` — otherwise bare Tab would stop indenting and stop
+    /// moving between fields in every app on the Mac.
+    private var wantedHotKeys: [ShortcutAction: Shortcut] {
+        guard preferences.isEnabled else { return [:] }
+
+        var wanted: [ShortcutAction: Shortcut] = [:]
+
+        // These already consume their key unconditionally in the tap, so
+        // registering them takes nothing new away from anyone. Bare bindings are
+        // left to the tap alone: a hot key on an unmodified key would claim it
+        // system-wide, and these three are never in a position to give it back.
+        for action in [ShortcutAction.forceActivate, .toggleCurrentApp, .toggleGlobally] {
+            if let shortcut = shortcuts.shortcut(for: action), shortcut.hasModifiers {
+                wanted[action] = shortcut
+            }
+        }
+
+        // An app that has refused insertions, or a caret scrolled out of sight,
+        // means the accept keys are not ours — `perform` hands them back in both
+        // cases, so they must not be registered.
+        if !insertionRefused(in: currentBundleID), !caretOutOfView {
+            let haveSomethingToAccept = isAccepting || currentSuggestion != nil
+            if haveSomethingToAccept || withinAcceptGrace,
+               let shortcut = shortcuts.shortcut(for: .nextWord) {
+                wanted[.nextWord] = shortcut
+            }
+            // No grace for the whole-suggestion key, matching `perform`: with
+            // nothing on screen the backtick has to type a backtick.
+            if haveSomethingToAccept, let shortcut = shortcuts.shortcut(for: .fullCompletion) {
+                wanted[.fullCompletion] = shortcut
+            }
+        }
+        return wanted
+    }
+
+    private func syncHotKeys() {
+        hotKeys.sync(wantedHotKeys)
+        scheduleGraceResync()
+    }
+
+    /// The accept grace is the only thing here that closes on a clock rather
+    /// than on an event, so without this nothing would come along to give Tab
+    /// back when it lapses.
+    private func scheduleGraceResync() {
+        graceResyncTimer?.invalidate()
+        graceResyncTimer = nil
+        guard currentSuggestion == nil, !isAccepting, let until = acceptGraceUntil else { return }
+        let delay = max(until.timeIntervalSinceNow, 0) + 0.05
+        graceResyncTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.syncHotKeys() }
+        }
     }
 
     // MARK: - Key handling
@@ -466,6 +538,7 @@ final class CompletionCoordinator: ObservableObject {
         // in which Tab has nothing to accept, and a Tab that reaches a browser
         // form moves focus and loses the caret.
         acceptGraceUntil = Date().addingTimeInterval(acceptGrace)
+        syncHotKeys()
 
         let app = currentBundleID
 
@@ -473,7 +546,10 @@ final class CompletionCoordinator: ObservableObject {
         // disables a tap whose callback runs long.
         Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.isAccepting = false }
+            defer {
+                self.isAccepting = false
+                self.syncHotKeys()
+            }
 
             let outcome = self.inserter.apply(toInsert, to: element)
             // Synthesized keystrokes are posted, not applied: the field does not
@@ -536,6 +612,7 @@ final class CompletionCoordinator: ObservableObject {
             // is only now being generated, and that is the gap Tab must not fall
             // into.
             self.acceptGraceUntil = Date().addingTimeInterval(self.acceptGrace)
+            self.syncHotKeys()
             self.scheduleFastPass()
         }
     }
@@ -657,6 +734,19 @@ final class CompletionCoordinator: ObservableObject {
         ), !(typo && !suggestion.isCorrection) {
             Log.core.debug("heuristic hit (\(suggestion.text.count) chars), caret=\(context.caretRect != nil, privacy: .public)")
             present(suggestion, in: context)
+            // A replacement is an offer to rewrite the word just typed, not a
+            // guess at what comes next. The model pass answers that different
+            // question for the same caret and presents unconditionally when it
+            // lands, so whatever arrives last wins: ":rocket" showed 🚀 and then
+            // lost it to a continuation a few hundred milliseconds later.
+            //
+            // Spelling fixes were already safe by accident — a misspelled word
+            // sets `typo`, and the guard below skips the model for it. A
+            // shortcode is spelled correctly as far as the checker is concerned,
+            // so nothing stopped it. Return on the replacement itself rather
+            // than on being a typo, which is the same reason the greeting lookup
+            // above returns instead of falling through.
+            if suggestion.isCorrection { return }
         } else {
             Log.core.debug("no heuristic match")
             clearSuggestion()
@@ -804,6 +894,7 @@ final class CompletionCoordinator: ObservableObject {
             ghostColor: screenContext.cached(for: context).backdrop?.ghostColor,
             strikeRect: strikeRect(for: suggestion, in: context)
         )
+        syncHotKeys()
     }
 
     /// Screen rect of the word a correction replaces, so it can be struck
@@ -818,6 +909,7 @@ final class CompletionCoordinator: ObservableObject {
         currentSuggestion = nil
         caretOutOfView = false
         overlay.hide()
+        syncHotKeys()
     }
 
     // MARK: - Keeping the overlay attached to the caret
@@ -938,6 +1030,7 @@ final class CompletionCoordinator: ObservableObject {
         guard reader.caretIsVisible(in: context) else {
             caretOutOfView = true
             overlay.hide()
+            syncHotKeys()
             return
         }
         guard let suggestion = currentSuggestion else { return }

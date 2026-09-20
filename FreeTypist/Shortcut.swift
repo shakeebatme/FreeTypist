@@ -34,6 +34,19 @@ struct Shortcut: Codable, Equatable, Sendable {
 
     var flags: CGEventFlags { CGEventFlags(rawValue: modifiers) }
 
+    /// The same modifiers in Carbon's bits, which `RegisterEventHotKey` takes
+    /// instead of `CGEventFlags`.
+    var carbonModifiers: UInt32 {
+        var carbon: UInt32 = 0
+        if flags.contains(.maskCommand) { carbon |= UInt32(cmdKey) }
+        if flags.contains(.maskShift) { carbon |= UInt32(shiftKey) }
+        if flags.contains(.maskAlternate) { carbon |= UInt32(optionKey) }
+        if flags.contains(.maskControl) { carbon |= UInt32(controlKey) }
+        return carbon
+    }
+
+    var hasModifiers: Bool { modifiers != 0 }
+
     /// "⌃⌥⌘`" style label.
     var display: String {
         var text = ""
@@ -130,6 +143,27 @@ enum ShortcutAction: String, CaseIterable, Codable, Sendable {
             Shortcut(keyCode: Shortcut.grave, modifiers: [.maskControl, .maskAlternate, .maskCommand])
         case .toggleGlobally: nil
         }
+    }
+}
+
+extension ShortcutAction {
+    /// Stable id carried in the Carbon `EventHotKeyID`, so a fired hot key can
+    /// be traced back to the action that registered it. These are persisted
+    /// nowhere; they only have to stay unique within a run.
+    var hotKeyID: UInt32 {
+        switch self {
+        case .nextWord: 1
+        case .fullCompletion: 2
+        case .forceActivate: 3
+        case .toggleCurrentApp: 4
+        case .toggleGlobally: 5
+        }
+    }
+
+    init?(hotKeyID: UInt32) {
+        guard let match = ShortcutAction.allCases.first(where: { $0.hotKeyID == hotKeyID })
+        else { return nil }
+        self = match
     }
 }
 

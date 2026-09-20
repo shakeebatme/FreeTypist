@@ -21,7 +21,15 @@ cd "$ROOT"
 
 # Identity resolution and the app signing itself both live in sign-app.sh, so
 # this script and release.sh cannot drift apart on Sparkle's signing order.
-IDENTITY=$(scripts/sign-app.sh --identity-only)
+#
+# Nothing can be notarized without a Developer ID, so an unnotarized build signs
+# ad-hoc. It must not quietly fall back to a development certificate: that
+# produces a bundle no Mac but this one will launch.
+SIGN_OPTS=()
+if [ "$NOTARIZE" -eq 0 ]; then
+  SIGN_OPTS=(--adhoc-ok)
+fi
+IDENTITY=$(scripts/sign-app.sh --identity-only $SIGN_OPTS)
 
 STAGE="$(mktemp -d /tmp/freetypist-dmg.XXXXXX)"
 trap 'rm -rf "$STAGE"' EXIT
@@ -48,7 +56,7 @@ cp -R "$APP_SRC" "$SRCDIR/FreeTypist.app"
 APP="$SRCDIR/FreeTypist.app"
 
 echo "==> Signing"
-scripts/sign-app.sh "$APP"
+FREETYPIST_IDENTITY="$IDENTITY" scripts/sign-app.sh $SIGN_OPTS "$APP"
 
 if [ "$NOTARIZE" -eq 1 ]; then
   echo "==> Notarizing the app"
@@ -85,6 +93,22 @@ Uninstalling: quit from the menu bar, then delete /Applications/FreeTypist.app
 and ~/Library/Application Support/FreeTypist.
 TXT
 
+if [ "$IDENTITY" = "-" ]; then
+  cat >> "$SRCDIR/INSTALL.txt" <<'TXT'
+
+This build is signed ad-hoc, not notarized
+==========================================
+
+Gatekeeper refuses an app it cannot trace to a Developer ID, so between step 1
+and step 2 above, run this once in Terminal:
+
+    xattr -dr com.apple.quarantine /Applications/FreeTypist.app
+
+Then launch it. An ad-hoc signature is a fresh identity every build, so each new
+build you install this way has to be granted Accessibility again.
+TXT
+fi
+
 DIST="$ROOT/dist"
 mkdir -p "$DIST"
 DMG="$DIST/FreeTypist-$VERSION.dmg"
@@ -94,7 +118,11 @@ echo "==> Building disk image"
 hdiutil create -volname "$VOLUME" -srcfolder "$SRCDIR" \
   -ov -format UDZO -quiet "$DMG"
 
-codesign --force --timestamp --sign "$IDENTITY" "$DMG"
+if [ "$IDENTITY" = "-" ]; then
+  codesign --force --sign - "$DMG"
+else
+  codesign --force --timestamp --sign "$IDENTITY" "$DMG"
+fi
 
 if [ "$NOTARIZE" -eq 1 ]; then
   echo "==> Notarizing the image"
