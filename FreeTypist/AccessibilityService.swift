@@ -13,10 +13,7 @@ final class AccessibilityService {
     }
 
     func openSettingsPane() {
-        guard let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-        ) else { return }
-        NSWorkspace.shared.open(url)
+        SystemSettings.accessibility.open()
     }
 
     /// TCC identifies an ad-hoc signed app by its code hash, so a rebuild looks

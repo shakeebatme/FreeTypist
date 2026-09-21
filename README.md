@@ -73,8 +73,10 @@ normal: pressing `` ` `` with no suggestion showing just types a backtick.
 next-best one, cycling back to the first at the end. The model is only asked
 for the others the first time you press it, so that press takes a moment.
 
-**Emoji:** type a colon and a name, such as `:rocket`, and the emoji is offered
-inline.
+**Emoji:** type a colon and a name, such as `:rocket`, `:check` or `:coffee`,
+and the emoji is offered inline. The name has to be complete — `:fire` works,
+`:fir` does not — because a colon is ordinary punctuation and a prefix match
+would fire in the middle of sentences.
 
 ### The menu bar
 

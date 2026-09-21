@@ -25,11 +25,68 @@ struct HeuristicProvider: CompletionProviding {
         ("feel free to", " reach out if anything is unclear."),
     ]
 
+    /// Shortcodes offered inline when someone types `:name`.
+    ///
+    /// Matched whole, not by prefix: `:fire` is 🔥 and `:fir` is nothing. A
+    /// prefix match would fire on half-typed words that happen to follow a
+    /// colon, and a colon is common punctuation.
+    ///
+    /// Sixteen entries before this, which covered a conversation's worth of
+    /// reactions and nothing anyone writes in a sentence. Still a hand-written
+    /// list rather than the full Unicode set: the whole set is thousands of
+    /// names, most of which nobody types, and the value here is in the few
+    /// dozen that come up. Duplicate keys in this literal are a *runtime*
+    /// crash, not a compile error, which is why a test reads the table.
+    /// Exposed for the test that reads it; reading is what catches a duplicate
+    /// key, which traps at runtime rather than failing to compile.
+    static var emojiTable: [String: String] { emoji }
+
     private static let emoji: [String: String] = [
-        ":smile": "😄", ":heart": "❤️", ":rocket": "🚀", ":thumbsup": "👍",
-        ":party": "🎉", ":check": "✅", ":sparkles": "✨", ":fire": "🔥",
-        ":eyes": "👀", ":100": "💯", ":cry": "😢", ":think": "🤔",
-        ":wave": "👋", ":pray": "🙏", ":bug": "🐛", ":ship": "🚢",
+        // Faces and reactions
+        ":smile": "😄", ":grin": "😁", ":laugh": "😂", ":joy": "😂",
+        ":wink": "😉", ":blush": "😊", ":sweat": "😅", ":thinking": "🤔",
+        ":think": "🤔", ":neutral": "😐", ":confused": "😕", ":sad": "😢",
+        ":cry": "😢", ":sob": "😭", ":angry": "😠", ":rage": "😡",
+        ":shocked": "😮", ":scream": "😱", ":sleepy": "😴", ":sunglasses": "😎",
+        ":nerd": "🤓", ":celebrate": "🥳", ":shrug": "🤷", ":facepalm": "🤦",
+        ":heart_eyes": "😍", ":wink_face": "😜", ":relieved": "😌",
+
+        // Hands and people
+        ":thumbsup": "👍", ":thumbsdown": "👎", ":clap": "👏", ":wave": "👋",
+        ":pray": "🙏", ":thanks": "🙏", ":ok": "👌", ":point_right": "👉",
+        ":point_left": "👈", ":raised_hands": "🙌", ":muscle": "💪",
+        ":handshake": "🤝", ":writing": "✍️", ":eyes": "👀", ":brain": "🧠",
+
+        // Marks and status
+        ":check": "✅", ":tick": "✅", ":cross": "❌", ":x": "❌",
+        ":warning": "⚠️", ":question": "❓", ":exclamation": "❗",
+        ":info": "ℹ️", ":star": "⭐", ":sparkles": "✨", ":fire": "🔥",
+        ":100": "💯", ":boom": "💥", ":zap": "⚡", ":bulb": "💡",
+        ":lock": "🔒", ":unlock": "🔓", ":key": "🔑", ":bell": "🔔",
+        ":no_entry": "⛔", ":recycle": "♻️", ":arrow_up": "⬆️",
+        ":arrow_down": "⬇️", ":arrow_right": "➡️", ":arrow_left": "⬅️",
+
+        // Work and writing
+        ":rocket": "🚀", ":ship": "🚢", ":wrench": "🔧", ":hammer": "🔨",
+        ":gear": "⚙️", ":bug": "🐛", ":computer": "💻", ":phone": "📱",
+        ":email": "📧", ":mail": "📧", ":calendar": "📅", ":clock": "🕐",
+        ":hourglass": "⏳", ":chart": "📊", ":chart_up": "📈",
+        ":chart_down": "📉", ":memo": "📝", ":note": "📝", ":book": "📖",
+        ":clipboard": "📋", ":folder": "📁", ":page": "📄", ":pin": "📌",
+        ":paperclip": "📎", ":link": "🔗", ":search": "🔍", ":printer": "🖨️",
+        ":package": "📦", ":label": "🏷️", ":money": "💰", ":card": "💳",
+        ":trophy": "🏆", ":medal": "🏅", ":target": "🎯", ":flag": "🚩",
+
+        // Everyday
+        ":heart": "❤️", ":broken_heart": "💔", ":party": "🎉", ":tada": "🎉",
+        ":gift": "🎁", ":balloon": "🎈", ":cake": "🎂", ":coffee": "☕",
+        ":tea": "🍵", ":beer": "🍺", ":wine": "🍷", ":pizza": "🍕",
+        ":food": "🍽️", ":apple": "🍎", ":sun": "☀️", ":moon": "🌙",
+        ":cloud": "☁️", ":rain": "🌧️", ":snow": "❄️", ":rainbow": "🌈",
+        ":earth": "🌍", ":tree": "🌳", ":flower": "🌸", ":dog": "🐶",
+        ":cat": "🐱", ":car": "🚗", ":plane": "✈️", ":train": "🚆",
+        ":house": "🏠", ":office": "🏢", ":music": "🎵", ":camera": "📷",
+        ":movie": "🎬", ":game": "🎮", ":sleep": "💤", ":bath": "🛁",
     ]
 
     private static let vocabulary = [

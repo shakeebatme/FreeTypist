@@ -40,6 +40,14 @@ xcrun swiftc -swift-version 6 \
   -o "$OUT/shortcuts"
 "$OUT/shortcuts"
 
+echo "==> System links and emoji"
+xcrun swiftc -swift-version 6 \
+  FreeTypist/SystemSettings.swift FreeTypist/HeuristicProvider.swift \
+  FreeTypist/Suggestion.swift FreeTypist/WordBoundary.swift \
+  Tests/SystemLinkTests/main.swift \
+  -o "$OUT/systemlinks"
+"$OUT/systemlinks"
+
 echo "==> Statistics"
 xcrun swiftc -swift-version 6 \
   FreeTypist/Statistics.swift Tests/StatisticsTests/main.swift \

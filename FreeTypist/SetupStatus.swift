@@ -67,9 +67,20 @@ enum SetupStatus {
             action: modelAction
         ))
 
+        // `CGRequestScreenCaptureAccess` shows the system prompt once per app
+        // identity and silently does nothing every time after that, so a button
+        // wired only to it stops working the moment someone clicks Deny — and
+        // looks broken rather than refused. Ask first, then hand over to the
+        // pane where the switch actually lives.
         let screen = ScreenCaptureService.hasPermission
         var screenAction: Action? = nil
-        if !screen { screenAction = { _ = ScreenCaptureService.requestPermission() } }
+        if !screen {
+            screenAction = {
+                if !ScreenCaptureService.requestPermission() {
+                    SystemSettings.screenRecording.open()
+                }
+            }
+        }
         steps.append(SetupStep(
             id: "screen",
             title: "Screen Recording permission",
@@ -126,6 +137,12 @@ enum SetupStatus {
 enum LaunchAtLogin {
     static var isEnabled: Bool {
         SMAppService.mainApp.status == .enabled
+    }
+
+    /// Where the user can overrule `SMAppService`, for when registering does
+    /// not take.
+    static func openLoginItems() {
+        SystemSettings.loginItems.open()
     }
 
     static func set(_ enabled: Bool) {
