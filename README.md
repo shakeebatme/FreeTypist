@@ -187,7 +187,9 @@ See [PRIVACY.md](PRIVACY.md) for exactly what is read, stored and sent.
 ## Contributing
 
 Bug reports and pull requests are welcome at
-[GitHub Issues](https://github.com/shakeebatme/FreeTypist/issues). Run the tests
+[GitHub Issues](https://github.com/shakeebatme/FreeTypist/issues).
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) is the map: what happens between
+a keystroke and grey text, and why each piece is the way it is. Run the tests
 with:
 
 ```sh
@@ -211,4 +213,6 @@ source license. Details are in
 [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
 
 **Also see:** [PRIVACY.md](PRIVACY.md) ·
-[SECURITY.md](SECURITY.md) · [docs/RELEASING.md](docs/RELEASING.md)
+[SECURITY.md](SECURITY.md) ·
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
+[docs/RELEASING.md](docs/RELEASING.md)
