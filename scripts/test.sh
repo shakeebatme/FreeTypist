@@ -40,6 +40,12 @@ xcrun swiftc -swift-version 6 \
   -o "$OUT/shortcuts"
 "$OUT/shortcuts"
 
+echo "==> Statistics"
+xcrun swiftc -swift-version 6 \
+  FreeTypist/Statistics.swift Tests/StatisticsTests/main.swift \
+  -o "$OUT/statistics"
+"$OUT/statistics"
+
 echo "==> Latency window"
 xcrun swiftc -swift-version 6 \
   FreeTypist/LatencyStats.swift Tests/LatencyTests/main.swift \

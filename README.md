@@ -96,7 +96,7 @@ inline.
 | **Shortcuts** | Rebind every key, choose what Escape does, and whether accepting a word also takes the space or punctuation after it |
 | **Battery** | Pause suggestions in Low Power Mode |
 | **Excluded Apps** | Apps FreeTypist stays out of, always or for a set time |
-| **Statistics** | Suggestions accepted and words inserted |
+| **Statistics** | Suggestions accepted, words inserted and how fast suggestions arrive, with a Reset |
 | **About** | Version, model, licenses |
 
 ### Excluded Apps

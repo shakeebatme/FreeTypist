@@ -86,17 +86,30 @@ struct BatteryPane: View {
 struct StatisticsPane: View {
     @ObservedObject var coordinator: CompletionCoordinator
 
+    /// Says what period the figures cover, because they now cover more than
+    /// this session and a total with no period is not a fact about anything.
+    private var countsDescription: String {
+        let since = coordinator.countingSince.formatted(date: .abbreviated, time: .omitted)
+        let speed = coordinator.latency.isEmpty
+            ? ""
+            : " Speed is the last \(coordinator.latency.count) suggestions from the model, "
+              + "and starts again each launch."
+        return "Counted since \(since). Nothing is sent anywhere.\(speed)"
+    }
+
     var body: some View {
         Section("Statistics") {
             LabeledContent("Suggestions accepted", value: "\(coordinator.acceptedCount)")
             LabeledContent("Words inserted", value: "\(coordinator.acceptedWords)")
             LabeledContent("Suggestion speed", value: coordinator.latency.summary)
-            Text(coordinator.latency.isEmpty
-                 ? "Counted since FreeTypist last started. Nothing is sent anywhere."
-                 : "Speed is the last \(coordinator.latency.count) suggestions from the model, "
-                   + "not the whole session. Counted since FreeTypist last started, "
-                   + "and nothing is sent anywhere.")
-                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Text(countsDescription)
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Reset") { coordinator.resetStatistics() }
+                    .controlSize(.small)
+                    .disabled(coordinator.acceptedCount == 0 && coordinator.acceptedWords == 0)
+            }
         }
     }
 }

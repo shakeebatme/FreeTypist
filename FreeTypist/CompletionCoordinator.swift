@@ -8,8 +8,12 @@ final class CompletionCoordinator: ObservableObject {
     @Published private(set) var statusMessage = "Starting…"
     @Published private(set) var modelStatus: ModelStatus = .noModelSelected
     @Published private(set) var isTapActive = false
+    /// Mirrors of the stored tally, so the settings row can observe them. The
+    /// tally itself is the record; these exist because SwiftUI watches
+    /// published properties and not a struct behind them.
     @Published private(set) var acceptedCount = 0
     @Published private(set) var acceptedWords = 0
+    @Published private(set) var countingSince = Date()
     @Published private(set) var lastSuggestionText = ""
     /// How long recent model passes took. Published so the settings row follows
     /// it; a model pass runs at most a couple of times a second, well under the
@@ -92,6 +96,10 @@ final class CompletionCoordinator: ObservableObject {
 
     private let ownBundleID = Bundle.main.bundleIdentifier
 
+    /// Counts that outlive the session. Loaded once here rather than at each
+    /// read: this is touched on every acceptance.
+    private var statistics = Statistics.load(from: .standard)
+
     /// Long enough to coalesce a burst of keystrokes, short enough to feel
     /// immediate. Also absorbs the duplicate AX notifications: Safari posts two
     /// `AXValueChanged` per keystroke and a trailing `AXSelectedTextChanged`.
@@ -126,6 +134,7 @@ final class CompletionCoordinator: ObservableObject {
 
     func start() {
         Log.core.notice("coordinator.start enabled=\(self.preferences.isEnabled, privacy: .public)")
+        publishStatistics()
         AX.configureMessagingTimeout()
 
         // Ask on first run. Besides showing the dialog, this registers FreeTypist
@@ -252,6 +261,21 @@ final class CompletionCoordinator: ObservableObject {
                 Log.core.error("shutdown: model teardown timed out")
             }
         }
+    }
+
+    /// Clears the tally. Offered because a count kept across launches is one
+    /// the user may well want to start again — after trying a different model,
+    /// or simply to see what a week looks like.
+    func resetStatistics() {
+        statistics.reset()
+        statistics.save(to: .standard)
+        publishStatistics()
+    }
+
+    private func publishStatistics() {
+        acceptedCount = statistics.accepted
+        acceptedWords = statistics.words
+        countingSince = statistics.since
     }
 
     func setEnabled(_ enabled: Bool) {
@@ -601,8 +625,15 @@ final class CompletionCoordinator: ObservableObject {
             // the condition they set was that a completion was accepted here,
             // and an insertion the app refused does not meet it.
             if inserted {
-                self.acceptedCount += 1
-                self.acceptedWords += toInsert.text.split(whereSeparator: \.isWhitespace).count
+                self.statistics.record(
+                    words: toInsert.text.split(whereSeparator: \.isWhitespace).count
+                )
+                // Written through on each acceptance rather than at quit. A
+                // menu-bar app is killed far more often than it is quit
+                // politely, and a tally that only survives a clean exit is not
+                // one anybody would trust.
+                self.statistics.save(to: .standard)
+                self.publishStatistics()
                 if self.session?.app == app {
                     self.session?.acceptedCompletion = true
                     self.session?.insertedText += " " + toInsert.text
