@@ -27,7 +27,3 @@ scripts/model-experiment-backend.py
 scripts/model-experiment.sh
 scripts/run-model-experiment.py
 scripts/summarize-model-experiment.py
-
-# Teardown of a competitor's shipped binary, kept locally for reference. Not
-# part of the app, and not ours to publish.
-docs/COTYPIST-COMPARISON.md
