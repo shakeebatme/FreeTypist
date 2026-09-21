@@ -100,7 +100,7 @@ would fire in the middle of sentences.
 | **Excluded Apps** | Apps FreeTypist stays out of, always or for a set time |
 | **Per-App Settings** | Suggestion length, mid-line, emoji and spelling fixes, changed for one app |
 | **Statistics** | Suggestions accepted, words inserted and how fast suggestions arrive, with a Reset |
-| **About** | Version, model, licenses |
+| **About** | Version, model, licenses, and any crash macOS has recorded |
 
 ### Per-App Settings
 

@@ -57,7 +57,14 @@ func run() async {
     print(pulled ? "NOTE  a learned term surfaced at full strength"
                  : "NOTE  no learned term surfaced; bias shifted wording only")
 
-    print(failures == 0 ? "\nBias wiring verified." : "\n\(failures) FAILED")
+    // Release the engine before exiting. ggml registers an atexit handler that
+// frees the Metal device and aborts if resource sets are still alive, so a
+// process that just calls exit() with a model loaded dies with SIGABRT in
+// ggml_metal_rsets_free. That is what was happening here, unnoticed, because
+// the crash comes after the last line of output and test.sh piped it away.
+await backend.shutdown()
+
+print(failures == 0 ? "\nBias wiring verified." : "\n\(failures) FAILED")
     exit(failures == 0 ? 0 : 1)
 }
 

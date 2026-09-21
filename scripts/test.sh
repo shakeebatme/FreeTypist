@@ -3,6 +3,10 @@
 # through engine swaps, since the rules they cover were established by measuring
 # real model output.
 set -e
+# Without this a crash is invisible whenever a test's output is piped into
+# grep: `set -e` sees grep's status, not the binary's. That is exactly how the
+# bias test aborted in ggml's atexit handler for weeks without anyone noticing.
+set -o pipefail
 ROOT="${0:A:h:h}"
 cd "$ROOT"
 
@@ -39,6 +43,12 @@ xcrun swiftc -swift-version 6 \
   Tests/ShortcutTests/main.swift \
   -o "$OUT/shortcuts"
 "$OUT/shortcuts"
+
+echo "==> Crash reports"
+xcrun swiftc -swift-version 6 \
+  FreeTypist/CrashReports.swift Tests/CrashReportTests/main.swift \
+  -o "$OUT/crashreports"
+"$OUT/crashreports"
 
 echo "==> System links and emoji"
 xcrun swiftc -swift-version 6 \

@@ -154,6 +154,10 @@ struct UpdatesPane: View {
 
 struct AboutPane: View {
     @ObservedObject var coordinator: CompletionCoordinator
+    /// Read when the pane appears rather than watched. Crashes are rare, the
+    /// window is open for seconds, and a file-system watcher for something
+    /// that happens twice a year is machinery nobody should maintain.
+    @State private var crashes: [CrashReports.Report] = []
 
     private var version: String {
         let info = Bundle.main.infoDictionary
@@ -172,6 +176,37 @@ struct AboutPane: View {
             Text("Everything runs on this Mac. No account, and nothing you type leaves it. The only network calls are the one-time model download and, if you leave it on, a daily check for a new version.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+
+        // FreeTypist has no window, so when it dies it simply stops
+        // suggesting — which looks exactly like a missing permission or an
+        // unsupported text field. Saying so is the whole feature.
+        Section("Diagnostics") {
+            if let latest = crashes.first {
+                LabeledContent("Last crash") {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(latest.date.formatted(date: .abbreviated, time: .shortened))
+                        Text(latest.summary)
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if crashes.count > 1 {
+                    LabeledContent("Reports kept", value: "\(crashes.count)")
+                }
+                HStack {
+                    Text("macOS wrote these. Nothing is sent anywhere; attach one to a bug report if you like.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Show") {
+                        NSWorkspace.shared.activateFileViewerSelecting([latest.url])
+                    }
+                    .controlSize(.small)
+                }
+            } else {
+                Text("No crashes recorded.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .task { crashes = CrashReports.recent() }
 
         // The GPL asks an interactive program to show its licence and point at
         // the source. This is that notice, not decoration.
