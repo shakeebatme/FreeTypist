@@ -98,8 +98,21 @@ would fire in the middle of sentences.
 | **Shortcuts** | Rebind every key, choose what Escape does, and whether accepting a word also takes the space or punctuation after it |
 | **Battery** | Pause suggestions in Low Power Mode |
 | **Excluded Apps** | Apps FreeTypist stays out of, always or for a set time |
+| **Per-App Settings** | Suggestion length, mid-line, emoji and spelling fixes, changed for one app |
 | **Statistics** | Suggestions accepted, words inserted and how fast suggestions arrive, with a Reset |
 | **About** | Version, model, licenses |
+
+### Per-App Settings
+
+Everything in **General** applies everywhere unless an app says otherwise.
+**Settings › Per-App Settings** is where one app disagrees: shorter suggestions
+in a chat app, no emoji or spelling fixes in an editor, mid-line completions
+only where you want them.
+
+Each setting is *Default* until you change it, and Default keeps following the
+global preference — including when you change that later. To stop overriding
+something, set it back to Default; an app with nothing left overridden drops
+off the list.
 
 ### Excluded Apps
 

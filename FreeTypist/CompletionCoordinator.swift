@@ -871,12 +871,13 @@ final class CompletionCoordinator: ObservableObject {
 
         let word = WordBoundary.currentWord(in: before)
         let typo = preferences.suppressOnTypo && WordBoundary.isMisspelled(word)
+        let app = context.bundleIdentifier
 
         if let suggestion = heuristic.suggestSync(
             before: before,
             after: context.textAfterCursor,
-            showFixes: preferences.showSuggestedFixes,
-            emoji: preferences.emojiSuggestions
+            showFixes: preferences.showSuggestedFixes(in: app),
+            emoji: preferences.emojiSuggestions(in: app)
         ), !(typo && !suggestion.isCorrection) {
             Log.core.debug("heuristic hit (\(suggestion.text.count) chars), caret=\(context.caretRect != nil, privacy: .public)")
             present(suggestion, in: context)
@@ -904,7 +905,7 @@ final class CompletionCoordinator: ObservableObject {
 
         // Mid-line suggestions compete with text the user already wrote, so they
         // are opt-in.
-        if preferences.midLineCompletions || Self.isAtLineEnd(context.textAfterCursor) {
+        if preferences.midLineCompletions(in: app) || Self.isAtLineEnd(context.textAfterCursor) {
             // In a terminal "after the cursor" is the rest of the screen buffer,
             // not the rest of a sentence, so it is not context the way it is in
             // a reply. `before` is already narrowed to the input line above.
@@ -914,12 +915,19 @@ final class CompletionCoordinator: ObservableObject {
             scheduleModelPass(before: before,
                               after: after,
                               appName: context.appName,
+                              bundleID: app,
                               signature: signature)
         }
     }
 
-    private func scheduleModelPass(before: String, after: String, appName: String?, signature: String) {
-        let maxWords = preferences.maxWords
+    private func scheduleModelPass(
+        before: String,
+        after: String,
+        appName: String?,
+        bundleID: String?,
+        signature: String
+    ) {
+        let maxWords = preferences.maxWords(in: bundleID)
         modelTask?.cancel()
         // The text has moved on, so anything gathered for the old caret is
         // about a sentence that no longer exists.

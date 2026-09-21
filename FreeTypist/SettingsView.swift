@@ -9,7 +9,7 @@ struct SettingsView: View {
 
     enum Pane: String, CaseIterable, Identifiable {
         case setup, general, context, personalization, emoji
-        case shortcuts, battery, apps, statistics, about
+        case shortcuts, battery, apps, perApp, statistics, about
 
         var id: String { rawValue }
 
@@ -23,6 +23,7 @@ struct SettingsView: View {
             case .shortcuts: "Shortcuts"
             case .battery: "Battery"
             case .apps: "Excluded Apps"
+            case .perApp: "Per-App Settings"
             case .statistics: "Statistics"
             case .about: "About"
             }
@@ -38,6 +39,7 @@ struct SettingsView: View {
             case .shortcuts: "command"
             case .battery: "battery.100"
             case .apps: "hand.raised"
+            case .perApp: "slider.horizontal.3"
             case .statistics: "chart.bar"
             case .about: "info.circle"
             }
@@ -76,6 +78,8 @@ struct SettingsView: View {
             Group {
                 if selection == .apps {
                     AppSettingsPane(preferences: preferences)
+                } else if selection == .perApp {
+                    PerAppPane(preferences: preferences)
                 } else {
                     Form {
                         detail
@@ -126,7 +130,7 @@ struct SettingsView: View {
             ShortcutsPane(preferences: preferences, shortcuts: coordinator.shortcuts)
         case .battery:
             BatteryPane(preferences: preferences)
-        case .apps:
+        case .apps, .perApp:
             // Laid out outside the form; see `body`.
             EmptyView()
         case .statistics:

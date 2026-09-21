@@ -139,6 +139,12 @@ final class Preferences: ObservableObject {
         didSet { saveExclusions() }
     }
 
+    /// Settings that differ in one app. Everything unset defers to the
+    /// properties above.
+    @Published var overrides: AppOverrides {
+        didSet { overrides.save(to: defaults) }
+    }
+
     init() {
         defaults.register(defaults: [
             Key.enabled: true, Key.useModel: true, Key.maxWords: 4,
@@ -169,6 +175,7 @@ final class Preferences: ObservableObject {
         showMenuBarIcon = defaults.bool(forKey: Key.showMenuBarIcon)
         terminalSuggestions = defaults.bool(forKey: Key.terminalSuggestions)
         exclusions = Self.loadExclusions(from: defaults)
+        overrides = AppOverrides.load(from: defaults)
         pruneExpiredExclusions()
     }
 
@@ -203,6 +210,28 @@ final class Preferences: ObservableObject {
         guard let data = try? JSONEncoder().encode(exclusions) else { return false }
         defaults.set(data, forKey: Key.appExclusions)
         return true
+    }
+
+    // MARK: - Resolved settings
+    //
+    // The app being typed in decides, falling back to the global value. Read
+    // through these rather than the properties directly, or an override is one
+    // that only works where somebody remembered it.
+
+    func maxWords(in bundleID: String?) -> Int {
+        overrides[bundleID].maxWords ?? maxWords
+    }
+
+    func midLineCompletions(in bundleID: String?) -> Bool {
+        overrides[bundleID].midLineCompletions ?? midLineCompletions
+    }
+
+    func emojiSuggestions(in bundleID: String?) -> Bool {
+        overrides[bundleID].emojiSuggestions ?? emojiSuggestions
+    }
+
+    func showSuggestedFixes(in bundleID: String?) -> Bool {
+        overrides[bundleID].showSuggestedFixes ?? showSuggestedFixes
     }
 
     /// Whether suggestions should appear in this app at all.

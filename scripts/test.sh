@@ -86,6 +86,12 @@ xcrun swiftc -swift-version 6 \
   -o "$OUT/secureinput"
 "$OUT/secureinput"
 
+echo "==> Per-app overrides"
+xcrun swiftc -swift-version 6 \
+  FreeTypist/AppOverrides.swift Tests/OverrideTests/main.swift \
+  -o "$OUT/overrides"
+"$OUT/overrides"
+
 echo "==> Excluded apps"
 xcrun swiftc -swift-version 6 \
   FreeTypist/AppExclusions.swift Tests/ExclusionTests/main.swift \
